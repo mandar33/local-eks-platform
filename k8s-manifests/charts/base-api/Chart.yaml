@@ -1,0 +1,6 @@
+apiVersion: v2
+name: base-api
+description: Reusable chart for HTTP API services (Deployment, Service, HPA)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

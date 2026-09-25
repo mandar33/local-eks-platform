@@ -1,0 +1,47 @@
+# kubectl apply -n argocd -f k8s-manifests/environments/dev/argocd-apps.yaml
+# Both apps render charts/base-api with their own values file.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: frontend-api-dev
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/charts/base-api
+    helm:
+      releaseName: frontend-api
+      valueFiles:
+        - ../../environments/dev/frontend-values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: crud-api-dev
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/charts/base-api
+    helm:
+      releaseName: crud-api
+      valueFiles:
+        - ../../environments/dev/crud-values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

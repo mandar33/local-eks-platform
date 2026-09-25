@@ -1,0 +1,9 @@
+# These are defaults that will be overridden by the environment files
+nameOverride: "default-api"
+image:
+  repository: "your-registry/default"
+  tag: "latest"
+autoscaling:
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
