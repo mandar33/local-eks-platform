@@ -1,0 +1,125 @@
+# Kargo: promote new frontend-api images into the dev environment.
+#
+#   docker push localhost:5001/frontend-api:1.0.1
+#     -> Warehouse sees the new SemVer tag in Zot and creates Freight
+#     -> promote the Freight to Stage "dev" (UI, CLI or a Promotion resource)
+#     -> Stage writes image.tag into frontend-values.yaml, commits, pushes
+#     -> Kargo asks Argo CD to sync frontend-api-dev
+#
+# Kargo commits with a GitHub token that lives only in Vault
+# (scripts/set-kargo-git-token.sh). The Vault Secrets Operator copies it into
+# this project's namespace as a Kargo git credential.
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Project
+metadata:
+  name: local-eks-platform
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Warehouse
+metadata:
+  name: frontend-images
+  namespace: local-eks-platform
+spec:
+  subscriptions:
+    - image:
+        # Kargo runs in the cluster, so it uses Zot's in-cluster name. The
+        # nodes pull the same images as localhost:5001/frontend-api.
+        repoURL: zot.registry.svc.cluster.local:5000/frontend-api
+        imageSelectionStrategy: SemVer
+        constraint: ^1.0.0
+        # Zot's certificate comes from the cluster's own CA, which Kargo
+        # doesn't trust. Traffic is still encrypted.
+        insecureSkipTLSVerify: true
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: dev
+  namespace: local-eks-platform
+spec:
+  requestedFreight:
+    - origin:
+        kind: Warehouse
+        name: frontend-images
+      sources:
+        direct: true
+  promotionTemplate:
+    spec:
+      vars:
+        - name: gitRepo
+          value: https://github.com/mandar33/local-eks-platform.git
+        - name: image
+          value: zot.registry.svc.cluster.local:5000/frontend-api
+      steps:
+        - uses: git-clone
+          config:
+            repoURL: ${{ vars.gitRepo }}
+            checkout:
+              - branch: main
+                path: ./repo
+        - uses: yaml-update
+          config:
+            path: ./repo/k8s-manifests/environments/dev/frontend-values.yaml
+            updates:
+              - key: image.tag
+                value: ${{ imageFrom(vars.image).Tag }}
+        - uses: git-commit
+          config:
+            path: ./repo
+            message: "dev: frontend-api ${{ imageFrom(vars.image).Tag }} (promoted by Kargo)"
+        - uses: git-push
+          config:
+            path: ./repo
+        - uses: argocd-update
+          config:
+            apps:
+              - name: frontend-api-dev
+                namespace: argocd
+---
+# GitHub credentials: Vault -> Vault Secrets Operator -> labelled Secret.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kargo-git
+  namespace: local-eks-platform
+---
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultConnection
+metadata:
+  name: vault
+  namespace: local-eks-platform
+spec:
+  address: http://vault.vault.svc.cluster.local:8200
+---
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultAuth
+metadata:
+  name: kargo-git
+  namespace: local-eks-platform
+spec:
+  vaultConnectionRef: vault
+  method: kubernetes
+  mount: kubernetes
+  kubernetes:
+    role: kargo-git
+    serviceAccount: kargo-git
+    audiences: ["vault"]
+---
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultStaticSecret
+metadata:
+  name: github-creds
+  namespace: local-eks-platform
+spec:
+  vaultAuthRef: kargo-git
+  type: kv-v2
+  mount: kv
+  path: kargo/github
+  refreshAfter: 60s
+  destination:
+    name: github-creds
+    create: true
+    labels:
+      kargo.akuity.io/cred-type: git

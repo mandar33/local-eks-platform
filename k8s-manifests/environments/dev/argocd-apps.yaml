@@ -2,12 +2,15 @@
 # The API apps render charts/base-api with their own values file;
 # platform-networking-dev syncs networking/ (Istio), postgres-dev syncs data/,
 # vault-secrets-dev syncs secrets/ (Vault Secrets Operator resources),
-# registry-dev syncs registry/ (Zot).
+# registry-dev syncs registry/ (Zot), kargo-dev syncs kargo/ (promotions).
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: frontend-api-dev
   namespace: argocd
+  annotations:
+    # Lets Kargo's "dev" Stage trigger syncs of this app (see kargo/).
+    kargo.akuity.io/authorized-stage: local-eks-platform:dev
 spec:
   project: default
   source:
@@ -132,6 +135,32 @@ spec:
       prune: true
       selfHeal: true
     # Needs cert-manager and the Vault Secrets Operator CRDs.
+    retry:
+      limit: 20
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kargo-dev
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/environments/dev/kargo
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: local-eks-platform
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    # The Project creates the namespace, so later resources may need a retry.
     retry:
       limit: 20
       backoff:

@@ -10,5 +10,6 @@ vault-init*.json
 *secret*.yaml
 !k8s-manifests/**/secrets/*.yaml
 kargo*.yaml
+!k8s-manifests/**/kargo/*.yaml
 *.pem
 *.key
