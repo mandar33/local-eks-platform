@@ -1,7 +1,8 @@
 # kubectl apply -n argocd -f k8s-manifests/environments/dev/argocd-apps.yaml
 # The API apps render charts/base-api with their own values file;
 # platform-networking-dev syncs networking/ (Istio), postgres-dev syncs data/,
-# vault-secrets-dev syncs secrets/ (Vault Secrets Operator resources).
+# vault-secrets-dev syncs secrets/ (Vault Secrets Operator resources),
+# registry-dev syncs registry/ (Zot).
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -105,6 +106,32 @@ spec:
       prune: true
       selfHeal: true
     # The VSO CRDs appear only after scripts/bootstrap-vault.sh runs.
+    retry:
+      limit: 20
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: registry-dev
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/environments/dev/registry
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: registry
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    # Needs cert-manager and the Vault Secrets Operator CRDs.
     retry:
       limit: 20
       backoff:

@@ -14,28 +14,10 @@
 # - Secrets reach `vault` over stdin, never as command-line arguments.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-STATE_DIR="${STATE_DIR:-$HOME/.local-eks-platform}"
-INIT_FILE="$STATE_DIR/vault-init.json"
+# shellcheck source=lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 VAULT_CHART_VERSION="0.34.1"
 VSO_CHART_VERSION="1.6.0"
-
-log() { printf '\n==> %s\n' "$*"; }
-
-random_secret() { head -c 48 /dev/urandom | base64 | tr -d '/+=\n' | cut -c1-32; }
-
-# Run `vault` inside the pod. The token goes in as the first stdin line;
-# anything piped into this function follows it (for `vault ... -`).
-vault_cmd() {
-  { printf '%s\n' "${ROOT_TOKEN:-}"; cat; } |
-    kubectl exec -i -n vault vault-0 -- sh -c \
-      'read -r VAULT_TOKEN; export VAULT_TOKEN; exec vault "$@"' vault "$@"
-}
-vault_run() { vault_cmd "$@" </dev/null; }
-
-vault_status() { kubectl exec -n vault vault-0 -- vault status -format=json 2>/dev/null || true; }
-
-json_field() { sed -n "s/.*\"$1\": *\"\{0,1\}\([^\",]*\)\"\{0,1\}.*/\1/p" | head -n1; }
 
 unseal() {
   local status
@@ -48,7 +30,7 @@ unseal() {
     [[ -f "$INIT_FILE" ]] || { echo "Missing $INIT_FILE; cannot unseal." >&2; exit 1; }
     local key
     key="$(sed -n '/"unseal_keys_b64"/{n;s/.*"\([^"]*\)".*/\1/p;}' "$INIT_FILE")"
-    printf '%s\n' "$key" | kubectl exec -i -n vault vault-0 -- sh -c 'read -r K; vault operator unseal "$K" >/dev/null'
+    printf '%s\n' "$key" | k exec -i -n vault vault-0 -- sh -c 'read -r K; vault operator unseal "$K" >/dev/null'
     echo "Vault unsealed."
   else
     echo "Vault is already unsealed."
@@ -58,7 +40,7 @@ unseal() {
 wait_for_pod_running() {
   local ns="$1" pod="$2"
   for _ in $(seq 1 60); do
-    [[ "$(kubectl get pod -n "$ns" "$pod" -o jsonpath='{.status.phase}' 2>/dev/null)" == "Running" ]] && return 0
+    [[ "$(k get pod -n "$ns" "$pod" -o jsonpath='{.status.phase}' 2>/dev/null)" == "Running" ]] && return 0
     sleep 5
   done
   echo "Timed out waiting for $ns/$pod" >&2
@@ -84,21 +66,21 @@ log "Initialising Vault"
 if [[ "$(vault_status | json_field initialized)" != "true" ]]; then
   mkdir -p "$STATE_DIR"
   chmod 700 "$STATE_DIR"
-  (umask 077; kubectl exec -n vault vault-0 -- vault operator init \
+  (umask 077; k exec -n vault vault-0 -- vault operator init \
     -key-shares=1 -key-threshold=1 -format=json >"$INIT_FILE")
   echo "Unseal key and root token saved to $INIT_FILE. Keep this file private."
 else
   echo "Already initialised."
 fi
 unseal
-ROOT_TOKEN="$(json_field root_token <"$INIT_FILE")"
+load_root_token
 
 log "Creating the Postgres admin password (only if missing)"
-kubectl create namespace data --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-if ! kubectl get secret postgres-admin -n data >/dev/null 2>&1; then
-  kubectl create secret generic postgres-admin -n data \
+k create namespace data --dry-run=client -o yaml | k apply -f - >/dev/null
+if ! k get secret postgres-admin -n data >/dev/null 2>&1; then
+  k create secret generic postgres-admin -n data \
     --from-literal=password="$(random_secret)" >/dev/null
-  kubectl label secret postgres-admin -n data app.kubernetes.io/managed-by=bootstrap-vault >/dev/null
+  k label secret postgres-admin -n data app.kubernetes.io/managed-by=bootstrap-vault >/dev/null
   echo "Created data/postgres-admin."
 else
   echo "data/postgres-admin already exists."
@@ -106,7 +88,7 @@ fi
 
 log "Waiting for Postgres (deployed by the postgres-dev Argo CD app)"
 wait_for_pod_running data postgres-0
-kubectl wait pod/postgres-0 -n data --for=condition=Ready --timeout=300s >/dev/null
+k wait pod/postgres-0 -n data --for=condition=Ready --timeout=300s >/dev/null
 
 log "Configuring Vault"
 mounts="$(vault_run secrets list -format=json)"
@@ -118,7 +100,7 @@ vault_run write auth/kubernetes/config kubernetes_host=https://kubernetes.defaul
 # Connect Vault to Postgres once, then rotate the admin password so that
 # only Vault knows it. Re-running skips this step.
 if ! vault_run read database/config/crud-postgres >/dev/null 2>&1; then
-  PG_ADMIN_PASSWORD="$(kubectl get secret postgres-admin -n data -o jsonpath='{.data.password}' | base64 -d)"
+  PG_ADMIN_PASSWORD="$(k get secret postgres-admin -n data -o jsonpath='{.data.password}' | base64 -d)"
   printf '{"plugin_name":"postgresql-database-plugin","connection_url":"postgresql://{{username}}:{{password}}@postgres.data.svc.cluster.local:5432/crud?sslmode=disable","username":"postgres","password":"%s","allowed_roles":["crud-api"],"password_authentication":"scram-sha-256"}' \
     "$PG_ADMIN_PASSWORD" | vault_cmd write database/config/crud-postgres - >/dev/null
   unset PG_ADMIN_PASSWORD
