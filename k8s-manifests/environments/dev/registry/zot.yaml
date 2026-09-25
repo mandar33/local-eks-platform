@@ -2,6 +2,8 @@
 #
 #   laptop  ──docker push localhost:5001──▶  NodePort 30500  ──▶  zot:5000 (TLS)
 #   kind nodes pull localhost:5001/<image> through a containerd mirror
+#   "compat: docker2s2" accepts images pushed by `docker push` (Docker v2
+#   manifests) as well as OCI ones.
 #   Kargo watches zot.registry.svc.cluster.local:5000
 #
 # Anyone in the cluster can pull. Pushing needs the `pusher` login, whose
@@ -86,6 +88,7 @@ data:
       "http": {
         "address": "0.0.0.0",
         "port": "5000",
+        "compat": ["docker2s2"],
         "tls": {
           "cert": "/etc/zot/tls/tls.crt",
           "key": "/etc/zot/tls/tls.key"
