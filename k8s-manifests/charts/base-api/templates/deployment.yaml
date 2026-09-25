@@ -4,7 +4,7 @@ metadata:
   name: {{ .Values.nameOverride }}
   namespace: default
 spec:
-  replicas: {{ .Values.autoscaling.minReplicas }}
+  # No `replicas`: the HPA owns the replica count (minReplicas..maxReplicas).
   selector:
     matchLabels:
       app: {{ .Values.nameOverride }}
@@ -12,12 +12,39 @@ spec:
     metadata:
       labels:
         app: {{ .Values.nameOverride }}
+        version: v1
     spec:
+      serviceAccountName: {{ .Values.nameOverride }}
       containers:
       - name: api
         image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
         ports:
         - containerPort: 8000
+        {{- if or .Values.env .Values.secretEnv }}
+        env:
+        {{- range $name, $value := .Values.env }}
+        - name: {{ $name }}
+          value: {{ $value | quote }}
+        {{- end }}
+        {{- range $name, $ref := .Values.secretEnv }}
+        - name: {{ $name }}
+          valueFrom:
+            secretKeyRef:
+              name: {{ $ref.secret }}
+              key: {{ $ref.key }}
+        {{- end }}
+        {{- end }}
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8000
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 10
         resources:
           requests:
             cpu: "100m"

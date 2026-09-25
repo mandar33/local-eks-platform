@@ -5,10 +5,20 @@ image:
   tag: dev
 
 env:
-  DB_HOST: postgres.default.svc.cluster.local
+  DB_HOST: postgres.data.svc.cluster.local
   DB_PORT: "5432"
   DB_NAME: crud
-  # Credentials belong in a Secret, not here.
+
+# Short-lived DB credentials issued by Vault's database engine.
+# The Vault Secrets Operator writes them to the crud-db Secret
+# (see environments/dev/secrets/) and restarts crud-api when they rotate.
+secretEnv:
+  DB_USER:
+    secret: crud-db
+    key: username
+  DB_PASSWORD:
+    secret: crud-db
+    key: password
 
 autoscaling:
   minReplicas: 1

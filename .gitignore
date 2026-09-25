@@ -1,0 +1,14 @@
+# Local tutorial page (copy lives in ~/Downloads/tutorials)
+docs/
+
+# Secrets must never be committed. These are the local files this setup
+# might create; the real ones live in ~/.local-eks-platform/ or in Vault.
+.local-eks-platform/
+vault-init*.json
+*.env
+.env*
+*secret*.yaml
+!k8s-manifests/**/secrets/*.yaml
+kargo*.yaml
+*.pem
+*.key

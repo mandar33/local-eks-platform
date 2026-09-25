@@ -7,3 +7,7 @@ autoscaling:
   minReplicas: 2
   maxReplicas: 10
   targetCPUUtilizationPercentage: 70
+# Plain env vars (name: value). Never put secrets here.
+env: {}
+# Env vars read from a Kubernetes Secret: NAME: {secret: <secret name>, key: <key>}
+secretEnv: {}

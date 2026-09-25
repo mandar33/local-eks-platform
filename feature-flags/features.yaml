@@ -3,4 +3,4 @@ flags:
   - key: enable-new-schema
     name: Enable New Database Schema
     type: BOOLEAN_FLAG_TYPE
-    state: ENABLED
+    enabled: true

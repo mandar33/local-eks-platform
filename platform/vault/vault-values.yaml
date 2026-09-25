@@ -1,0 +1,14 @@
+# Helm values for hashicorp/vault, installed by scripts/bootstrap-vault.sh.
+# Standalone server with file storage on a PVC, so data survives restarts.
+# Vault starts sealed; the script initialises and unseals it.
+server:
+  standalone:
+    enabled: true
+  dataStorage:
+    enabled: true
+    size: 1Gi
+# Credentials reach apps through the Vault Secrets Operator instead.
+injector:
+  enabled: false
+ui:
+  enabled: true
