@@ -1,8 +1,8 @@
 nameOverride: crud-api
 
 image:
-  repository: crud-api
-  tag: dev
+  repository: localhost:5001/crud-api
+  tag: 1.0.0
 
 env:
   DB_HOST: postgres.data.svc.cluster.local
