@@ -6,7 +6,7 @@
 #   4. set the canary weight back to 0 and canary.enabled: false
 track: canary
 canary:
-  enabled: true
+  enabled: false
   replicas: 1
 image:
   tag: 1.1.1
