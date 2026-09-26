@@ -194,6 +194,8 @@ spec:
     automated:
       prune: true
       selfHeal: true
+      # With canary.enabled: false the release is empty; let Argo CD remove it.
+      allowEmpty: true
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application

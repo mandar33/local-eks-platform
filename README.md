@@ -2,7 +2,7 @@
 
 A production-shaped Kubernetes platform that runs on a laptop. Two Python APIs sit behind an Istio ingress gateway. A feature flag in Flipt decides which database schema the frontend reads. Images live in a private Zot registry, Kargo promotes new versions, and Argo CD deploys everything from this Git repo.
 
-It's meant for learning how the usual EKS building blocks fit together (service mesh, GitOps, feature flags, autoscaling, image promotion and secrets management) without a cloud account.
+It's meant for learning how the usual EKS building blocks fit together without a cloud account: service mesh, GitOps, feature flags, autoscaling, canary releases, image promotion, secrets management, cell-based architecture with Crossplane, and a second region with failover.
 
 **No secrets are stored in this repo.** Database users, the registry login and Kargo's GitHub token all live in HashiCorp Vault (see [Secrets](#secrets)).
 
@@ -74,6 +74,44 @@ flowchart LR
 
 Git stays the record of what runs where: every promotion is a commit you can read, revert or audit.
 
+### Regions and cells
+
+```mermaid
+flowchart TB
+    user([Laptop]) -->|localhost:7080| lb[global-lb<br/>nginx container]
+    user -->|localhost:8080| gwa
+    user -->|cells.localhost:8080| gwa
+    user -->|localhost:9080| gwb
+
+    subgraph A["Region A · kind cluster dev-cluster"]
+        gwa[Istio gateway]
+        gwa -->|"90/10 weights"| def["default namespace<br/>frontend stable + canary"]
+        gwa -->|"odd user IDs"| ca["cell-a<br/>frontend + crud"]
+        gwa -->|"even user IDs"| cb["cell-b<br/>frontend + crud"]
+        pg[(Postgres)]
+        vault[Vault]
+        argo[Argo CD]
+        xp[Crossplane]
+        xp -. creates .-> ca
+        xp -. creates .-> cb
+    end
+
+    subgraph B["Region B · kind cluster region-b"]
+        gwb[Istio gateway] --> defb["default namespace<br/>frontend + crud"]
+    end
+
+    lb -->|round robin + failover| gwa
+    lb --> gwb
+    defb -->|"NodePort 30432"| pg
+    defb -. "DB users via auth mount<br/>kubernetes-region-b" .-> vault
+    argo -. deploys .-> defb
+```
+
+- **Region A** (`dev-cluster`) runs everything, including the shared services: Postgres, Vault, Zot, Argo CD, Kargo and Crossplane.
+- **Region B** (`region-b`) runs its own gateway, frontend, crud-api and Flipt. It reads region A's Postgres and gets DB users from region A's Vault. Argo CD in region A deploys it.
+- **Cells** are complete copies of the app stack inside region A, each serving a slice of users. A `Cell` resource (Crossplane) creates one.
+- **global-lb** spreads requests across both regions and retries in the other region if one fails, like Route 53 failover routing would.
+
 ## Components
 
 | Component | Version | Namespace | What it does here |
@@ -89,6 +127,8 @@ Git stays the record of what runs where: every promotion is a commit you can rea
 | [Kargo](https://kargo.io/) | 1.11.4 | `kargo` | Watches Zot for new `frontend-api` tags and promotes them into `dev` through Git. |
 | [cert-manager](https://cert-manager.io/) | v1.21.2 | `cert-manager` | Issues Zot's TLS certificate (from a cluster-local CA) and Kargo's webhook certificates. |
 | [metrics-server](https://github.com/kubernetes-sigs/metrics-server) | latest chart | `kube-system` | Supplies CPU metrics to the HPAs. |
+| [Crossplane](https://www.crossplane.io/) | v2.4.2 | `crossplane-system` | Provides the `Cell` API: one small resource becomes a namespace, two Argo CD apps, DB credentials and an access policy. |
+| nginx (global-lb) | 1.29 | Docker container | Global load balancer on `localhost:7080` across both regions' gateways, with failover. |
 | [Argo Rollouts](https://argoproj.github.io/rollouts/) | v1.10.0 | `argo-rollouts` | Progressive delivery (canary, blue/green). Installed for Kargo verification, not used yet. |
 
 ### The apps
@@ -98,7 +138,7 @@ Git stays the record of what runs where: every promotion is a commit you can rea
 | `frontend-api` | The public API. Asks Flipt which schema to use, then calls `crud-api`. | `GET /users/{id}`, `GET /healthz` |
 | `crud-api` | Reads users from Postgres. Only reachable from `frontend-api`. | `GET /api/v1/users/{id}`, `GET /api/v2/users/{id}`, `GET /healthz` |
 
-Both are FastAPI apps listening on port 8000, deployed from `localhost:5001/<app>:<version>`. Configuration comes from environment variables set in the Helm values files. `crud-api` reads `DB_USER` and `DB_PASSWORD` from the `crud-db` Secret, which the Vault Secrets Operator creates and keeps up to date.
+Both are FastAPI apps listening on port 8000, deployed from `localhost:5001/<app>:<version>`. From 1.1.1 the images build on [Chainguard's Python image](https://images.chainguard.dev/directory/image/python/overview): no shell or package manager, non-root user, and **0 known vulnerabilities** in Zot's scan (1.0.0, on `python:3.13-slim`, had 71). `frontend-api` returns an `x-app-version` header so you can see which version answered. Configuration comes from environment variables set in the Helm values files. `crud-api` reads `DB_USER` and `DB_PASSWORD` from the `crud-db` Secret, which the Vault Secrets Operator creates and keeps up to date.
 
 ## Repository layout
 
@@ -114,20 +154,28 @@ local-eks-platform/
 │   │                            #   Deployment, Service, HPA, ServiceAccount
 │   └── environments/dev/
 │       ├── frontend-values.yaml # frontend values (image, env); Kargo updates image.tag
+│       ├── frontend-canary-values.yaml # canary on/off + tag, layered on frontend-values
 │       ├── crud-values.yaml     # crud values (image, env, which Secret keys to read)
-│       ├── argocd-apps.yaml     # The seven Argo CD Applications
+│       ├── argocd-apps.yaml     # Argo CD Applications for region A
 │       ├── networking/          # Istio Gateway, VirtualService, AuthorizationPolicy
 │       ├── data/                # Postgres StatefulSet + seed SQL (no credentials)
 │       ├── secrets/             # Vault Secrets Operator resources for crud-db
 │       ├── registry/            # Zot: TLS certs, config, Deployment, NodePort 30500
-│       └── kargo/               # Kargo Project, Warehouse, Stage, Git credentials
+│       ├── kargo/               # Kargo Project, Warehouse, Stages (dev, region-b), Git credentials
+│       ├── crossplane/          # The Cell API: XRD, Composition, functions, RBAC
+│       ├── cells/               # Cell a and Cell b
+│       ├── regions/             # NodePorts region B uses for Vault and Postgres
+│       └── region-b/            # Region B: values overrides, networking, secrets, Argo CD apps
 ├── platform/vault/              # Helm values for Vault
+├── platform/global-lb/          # nginx config for the global load balancer
 ├── scripts/
 │   ├── bootstrap-vault.sh       # Install + configure Vault; `unseal` after restarts
 │   ├── setup-registry.sh        # Registry login in Vault, node mirrors, docker login
 │   ├── set-kargo-git-token.sh   # Store Kargo's GitHub token in Vault (hidden prompt)
+│   ├── setup-region.sh          # Register region-b with Argo CD and Vault; start global-lb
 │   └── lib.sh                   # Shared helpers
-├── kind-config.yaml             # Cluster layout; ports 8080, 8443, 5001; registry mirrors
+├── kind-config.yaml             # Region A: ports 8080, 8443, 5001; registry mirrors
+├── kind-config-region-b.yaml    # Region B: ports 9080, 9443
 ├── istio-config.yaml            # Istio install overlay (gateway as NodePort 30080/30443)
 └── istio-mtls.yaml              # Mesh-wide STRICT mTLS
 ```
@@ -142,7 +190,12 @@ Argo CD Applications in `argocd-apps.yaml`:
 | `postgres-dev` | `environments/dev/data/` | Postgres StatefulSet, Service, seed SQL |
 | `vault-secrets-dev` | `environments/dev/secrets/` | Resources that produce the `crud-db` Secret |
 | `registry-dev` | `environments/dev/registry/` | Zot and its certificates and login |
-| `kargo-dev` | `environments/dev/kargo/` | Kargo Project, Warehouse, Stage and Git credentials |
+| `kargo-dev` | `environments/dev/kargo/` | Kargo Project, Warehouse, Stages and Git credentials |
+| `frontend-api-canary-dev` | `charts/base-api` + `frontend-values.yaml` + `frontend-canary-values.yaml` | The frontend canary Deployment (nothing when `canary.enabled: false`) |
+| `crossplane-dev` | `environments/dev/crossplane/` | The `Cell` API |
+| `cells-dev` | `environments/dev/cells/` | `Cell` a and b; Crossplane then creates `cell-<name>-frontend-api` and `cell-<name>-crud-api` apps |
+| `cross-region-dev` | `environments/dev/regions/` | NodePorts 30820 (Vault) and 30432 (Postgres) for region B |
+| `region-b-*` (4 apps) | `environments/region-b/` + the chart | Region B's frontend, crud-api, networking and DB credentials, deployed to the `region-b` cluster |
 
 ## Setup from scratch
 
@@ -210,8 +263,43 @@ done
 # 11. Kargo's GitHub token (fine-grained: this repo only, Contents read/write)
 scripts/set-kargo-git-token.sh
 
-kubectl get applications -n argocd -w     # wait for all seven: Synced / Healthy
+# 12. Crossplane, for cells (the crossplane-dev and cells-dev apps do the rest)
+helm repo add crossplane-stable https://charts.crossplane.io/stable
+helm upgrade --install crossplane crossplane-stable/crossplane --version 2.4.2 \
+  -n crossplane-system --create-namespace --wait
+
+kubectl get applications -n argocd -w     # wait for everything: Synced / Healthy
 ```
+
+<details>
+<summary>Optional: region B and the global load balancer</summary>
+
+Region B needs about 2 GB more memory.
+
+```bash
+kind create cluster --name region-b --config=kind-config-region-b.yaml
+kubectl config use-context kind-region-b
+istioctl install -f istio-config.yaml -y
+kubectl label namespace default istio-injection=enabled
+kubectl apply -f istio-mtls.yaml
+helm upgrade --install flipt flipt/flipt -n default \
+  --set flipt.config.storage.type=git \
+  --set flipt.config.storage.git.repository=https://github.com/mandar33/local-eks-platform.git \
+  --set flipt.config.storage.git.ref=main --set flipt.config.storage.git.directory=feature-flags
+helm upgrade --install metrics-server metrics-server/metrics-server -n kube-system --set 'args={--kubelet-insecure-tls}'
+helm upgrade --install vault-secrets-operator hashicorp/vault-secrets-operator --version 1.6.0 \
+  -n vault-secrets-operator-system --create-namespace --wait
+kubectl config use-context kind-dev-cluster
+
+# Region B's nodes pull from region A's Zot
+CLUSTER=region-b REGISTRY_HOST=dev-cluster-control-plane scripts/setup-registry.sh nodes
+
+# Register region B with Argo CD and Vault, start global-lb on localhost:7080
+scripts/setup-region.sh
+kubectl apply -n argocd -f k8s-manifests/environments/region-b/argocd-apps.yaml
+```
+
+</details>
 
 What waits for what, so nothing surprises you:
 
@@ -329,7 +417,7 @@ If Flipt crash-loops after a push, the file has a field Flipt doesn't accept. `k
 ### Argo CD
 
 ```bash
-kubectl get applications -n argocd                 # all seven: Synced / Healthy
+kubectl get applications -n argocd                 # all Synced / Healthy
 
 # Self-heal: delete something Argo CD manages and watch it come back
 kubectl delete svc crud-api-svc && kubectl get svc crud-api-svc
@@ -341,6 +429,89 @@ kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.pas
 ```
 
 **Rolling back** is a Git revert: `git revert <commit> && git push`, and Argo CD applies the previous state.
+
+### Hardened images
+
+```bash
+q() { curl -sk -X POST https://localhost:5001/v2/_zot/ext/search -H 'Content-Type: application/json' \
+  -d "{\"query\":\"{ CVEListForImage(image: \\\"$1\\\") { Summary { Count HighCount } } }\"}"; echo; }
+q frontend-api:1.0.0     # {"Count":71,"HighCount":10}   python:3.13-slim
+q frontend-api:1.1.1     # {"Count":0,"HighCount":0}     Chainguard python, pip removed
+```
+
+The first Chainguard build (1.1.0) still had 3. They were in pip, which the build copied into the app. The Dockerfile now uninstalls pip after installing dependencies. The runtime image has no shell, so `kubectl exec ... -- sh` doesn't work in these containers; debug with `kubectl debug` or logs instead.
+
+### Canary release (Istio)
+
+The frontend has a second Deployment, `frontend-api-canary`, controlled by `frontend-canary-values.yaml`. Istio splits gateway traffic between the `stable` and `canary` pods by weight (`networking/istio-networking.yaml`), and the header `x-canary: always` forces the canary.
+
+```bash
+# 1. Turn it on: canary.enabled: true and image.tag: <new tag> in frontend-canary-values.yaml,
+#    stable/canary weights 90/10 in both VirtualServices; commit, push.
+# 2. Count which version answers
+for i in $(seq 1 200); do curl -s -o /dev/null -D - localhost:8080/users/1 | grep -i '^x-app-version' ; done | sort | uniq -c
+#     176 x-app-version: <stable tag>
+#      24 x-app-version: <canary tag>      (about 10%)
+curl -s -o /dev/null -D - -H 'x-canary: always' localhost:8080/users/1 | grep -i '^x-app-version'
+# 3. Happy? Promote the same tag to stable with Kargo (below).
+# 4. Weights back to 100/0 and canary.enabled: false; commit, push. Argo CD removes the canary.
+```
+
+If you set weights while `canary.enabled` is false, the canary share gets `503`: there are no canary pods to send it to.
+
+### Cells (Crossplane)
+
+```bash
+kubectl get cells                                   # NAME  FRONTEND  CRUD   SYNCED  READY
+                                                    # a     1.1.1     1.1.1  True    True
+# Odd user IDs go to cell a, even to cell b; x-cell pins a request
+for u in 1 2 3 4; do curl -s -o /dev/null -D - http://cells.localhost:8080/users/$u | grep -i '^x-cell'; done
+# x-cell: a / x-cell: b / x-cell: a / x-cell: b
+curl -s -D - -H 'x-cell: b' http://cells.localhost:8080/users/1 | grep -i '^x-cell'
+
+# Cells are isolated: cell a's frontend identity can't call cell b's crud-api
+kubectl run xcell -n cell-a --image=curlimages/curl --restart=Never \
+  --overrides='{"spec":{"serviceAccountName":"frontend-api"}}' --command -- sleep 300
+kubectl exec -n cell-a xcell -c xcell -- curl -s http://crud-api-svc.cell-b.svc.cluster.local/api/v1/users/1
+# RBAC: access denied
+kubectl delete pod xcell -n cell-a
+```
+
+**Add a cell:** copy a `Cell` in `k8s-manifests/environments/dev/cells/cells.yaml` with a new name, push, and add a route for it in the `cell-router` VirtualService. Crossplane creates the namespace, both Argo CD apps, the Vault credential resources and the access policy. Each cell gets its own DB user; cells share the one Postgres to save memory. A production cell would also have its own data store.
+
+If `cells.localhost` doesn't resolve on your machine, use `curl -H 'Host: cells.localhost' localhost:8080/users/1`.
+
+### Multi-region
+
+```bash
+curl -s -D - localhost:8080/users/2 | grep -i x-region    # x-region: a
+curl -s -D - localhost:9080/users/2 | grep -i x-region    # x-region: b
+
+# The global load balancer spreads requests
+for i in $(seq 1 40); do curl -s -o /dev/null -D - localhost:7080/users/1 | grep -i '^x-region'; done | sort | uniq -c
+#   20 x-region: a
+#   20 x-region: b
+
+# Failover: take region A's gateway down while requests keep flowing
+kubectl scale deploy istio-ingressgateway -n istio-system --replicas=0
+for i in $(seq 1 20); do curl -s -o /dev/null -w '%{http_code} ' -D - localhost:7080/users/1 | grep -i '^x-region'; done | sort | uniq -c
+#   20 x-region: b          (all 200)
+kubectl scale deploy istio-ingressgateway -n istio-system --replicas=1
+```
+
+Measured here: 176 requests during a 25-second region A outage, all returned 200.
+
+**Releases go region by region.** Kargo's `region-b` Stage only accepts Freight that `dev` (region A) already has:
+
+```bash
+# Promoting a new tag straight to region-b is refused:
+#   spec.freight: Invalid value: ...: Freight is not available to this Stage
+# Promote to dev first, then region-b. Each promotion is a Kargo commit:
+#   dev: frontend-api 1.1.2 (promoted by Kargo)
+#   region-b: frontend-api 1.1.2 (promoted by Kargo)
+```
+
+What's simplified: region B has no database or Vault of its own, so region A is still a single point of failure for data. Real multi-region setups replicate the database and run Vault per region (or use a managed service), and often connect the service meshes (Istio multi-cluster) so services can fail over individually.
 
 ### Autoscaling (HPA)
 
@@ -468,6 +639,11 @@ After a successful promotion:
 | `docker push` fails with `manifest invalid` | Zot rejects Docker v2 manifests unless `compat: docker2s2` is set | Already set in `registry/zot.yaml`; check the ConfigMap was synced |
 | Kargo promotion `Errored`: `Invalid username or token` | Bad GitHub token in Vault (for example pasted twice) | Re-run `scripts/set-kargo-git-token.sh` and paste once; the script now rejects malformed tokens |
 | Kargo `git push` rejected (non-fast-forward) | Someone pushed to `main` between clone and push | Promote again |
+| `password authentication failed` for a `v-kubernet-crud-api-...` user after Vault was sealed | The operator stopped renewing while Vault was sealed and the DB user expired | `scripts/bootstrap-vault.sh unseal` now restarts the operator; on older setups run `kubectl rollout restart deploy -n vault-secrets-operator-system vault-secrets-operator-controller-manager` |
+| Argo CD sync fails with `field is immutable` on a Deployment `selector` | The chart changed the Deployment's labels (for example adding `track`) | Delete the Deployment once; Argo CD recreates it (a few seconds of downtime) |
+| Disabled canary still running, app `OutOfSync` | Argo CD won't auto-sync an app down to zero resources | `allowEmpty: true` on the canary app (already set) |
+| `Cell` stays `READY False` | Crossplane only sees a `Ready` condition; Argo CD apps and AuthorizationPolicies don't have one | The Composition sets readiness from Argo CD health (already set) |
+| `global-lb` doesn't start from Git Bash | Docker for Windows got a `/c/...` path | Fixed in `setup-region.sh` with `cygpath` |
 
 ## Secrets
 
@@ -481,6 +657,7 @@ After a successful promotion:
 | `crud-api` DB user + password | Vault's database engine, on request | `default/crud-db` Secret, written by the Vault Secrets Operator | `crud-api` pods |
 | Registry push login (`pusher`) | `setup-registry.sh` (random) | Vault `kv/registry/pusher`; Zot gets only a bcrypt hash via `kv/registry/htpasswd` | You, through `setup-registry.sh login` |
 | Kargo's GitHub token | You, at a hidden prompt | Vault `kv/kargo/github`, copied to `local-eks-platform/github-creds` | Kargo |
+| Region B's Argo CD and Vault reviewer tokens | `setup-region.sh`, as ServiceAccount tokens in region B | `argocd/cluster-region-b` Secret; Vault `auth/kubernetes-region-b/config` | Argo CD; Vault |
 | Vault unseal key + root token | `vault operator init` | `~/.local-eks-platform/vault-init.json`, outside the repo | You |
 | Argo CD admin password | Argo CD install | `argocd/argocd-initial-admin-secret` | Cluster admins |
 | Kargo admin password | You, at a hidden prompt | Only its bcrypt hash, in the Kargo release | You |
