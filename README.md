@@ -684,6 +684,21 @@ After a successful promotion:
 
 **Shipping a real code change** is the same loop: edit `apps/frontend-api`, then `docker build -t localhost:5001/frontend-api:1.0.2 apps/frontend-api && docker push localhost:5001/frontend-api:1.0.2`, and promote the new Freight.
 
+## Full walkthrough
+
+Every step of the flow was tested in one continuous run on 26 Sep 2026, then undone the same way:
+
+1. **Code:** change `apps/frontend-api`, push. CI (run 5) built and scanned `1.2.5` and waited for approval.
+2. **Approve:** Kargo committed `dev: frontend-api 1.2.5`; Argo CD rolled it out in region A.
+3. **Region B:** a Kargo Promotion to Stage `region-b`; both regions served `1.2.5`, and `localhost:7080` split 10/10 between them.
+4. **Helm value:** `LOG_LEVEL: debug` in `frontend-values.yaml` appeared in the Deployment's env; reverted.
+5. **Istio route:** `networking/hello-route.yaml` added through Git made `/hello` return 200; deleting the file made Argo CD prune it (404 again).
+6. **Cell:** adding Cell `c` to `cells.yaml` gave a working cell in 65 seconds; removing it cleaned up the namespace and apps in 16 seconds.
+7. **Failover:** with region A's gateway at 0 replicas, all requests through `localhost:7080` were answered by region B.
+8. **Undo:** the code revert went through CI (run 6, `1.2.6`), `dev` and `region-b`.
+
+Not yet tested: a clean rebuild from an empty laptop using "Setup from scratch".
+
 ## Renewals
 
 Two credentials expire and must be renewed by hand. `scripts/check-expiry.sh` prints the current dates (secrets never leave Vault; it only reads the expiry).
