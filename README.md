@@ -6,6 +6,23 @@ It's meant for learning how the usual EKS building blocks fit together without a
 
 **No secrets are stored in this repo.** Database users, the registry login and Kargo's GitHub token all live in HashiCorp Vault (see [Secrets](#secrets)).
 
+## New to this? The pieces in plain words
+
+| Piece | In plain words | What it does here |
+|---|---|---|
+| **Kubernetes** | A manager for your apps: you describe what should run, and it keeps that true, restarting anything that dies. | Runs everything below, in local "clusters" made by kind. |
+| **Pod / Deployment / Service** | A pod is a running copy of your app; a Deployment keeps N pods alive; a Service is the stable name other apps call. | `frontend-api` and `crud-api` each have all three. |
+| **Helm** | A form with blanks (the chart) plus one filled-in copy per app (a values file). | One chart, `charts/base-api`, builds both APIs. |
+| **Istio** | Gives every app a personal assistant (the *sidecar*) that encrypts calls and checks who's calling, plus a receptionist (the *gateway*) at the front door. | `localhost:8080` goes through the gateway; crud-api only accepts calls from the frontend. |
+| **Flipt** | Light switches for features: the code has both paths, a flag picks one, no redeploy needed. | `enable-new-schema` chooses between the v1 and v2 database tables. |
+| **Argo CD** | A thermostat set by Git: it keeps comparing the cluster with Git, and fixes any difference. | Deploys everything in `k8s-manifests/`; undoes manual changes. |
+| **Zot** | A private warehouse for app images; a tag like `1.1.2` is the label on a box. | Stores the app images at `localhost:5001` and scans them for known vulnerabilities. |
+| **Kargo** | A release manager: notices new images and, when you approve, moves a version environment by environment, writing each move into Git. | Promotes `frontend-api` to `dev`, then to `region-b`. |
+| **Vault** | A safe that hands out short-lived keys instead of shared passwords. | Creates a temporary database user for each crud-api. |
+| **Crossplane** | Lets you define your own "order form" (here a `Cell`) that expands into many resources. | One `Cell` becomes a namespace, two apps, credentials and access rules. |
+
+Kubernetes is new to you? Start with **Setup** below, then work through [How to test each component](#how-to-test-each-component) from the top. Each section builds on the one before.
+
 ## Architecture
 
 ### Request flow
