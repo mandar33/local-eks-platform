@@ -15,6 +15,9 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 CLUSTER="${CLUSTER:-dev-cluster}"
+# Where Zot's NodePort is. Other clusters (e.g. region-b) point at dev-cluster:
+#   CLUSTER=region-b REGISTRY_HOST=dev-cluster-control-plane scripts/setup-registry.sh nodes
+REGISTRY_HOST="${REGISTRY_HOST:-$CLUSTER-control-plane}"
 REGISTRY="localhost:5001"
 NODE_PORT=30500
 PUSH_USER="pusher"
@@ -75,7 +78,7 @@ setup_nodes() {
     docker exec -i "$node" sh -c "cat > '$dir/hosts.toml'" <<EOF
 server = "https://$REGISTRY"
 
-[host."https://$CLUSTER-control-plane:$NODE_PORT"]
+[host."https://$REGISTRY_HOST:$NODE_PORT"]
   capabilities = ["pull", "resolve"]
   ca = "$dir/ca.crt"
 EOF

@@ -246,3 +246,23 @@ spec:
         duration: 15s
         factor: 2
         maxDuration: 5m
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cross-region-dev
+  namespace: argocd
+spec:
+  # NodePorts for Vault and Postgres that region B connects to.
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/environments/dev/regions
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

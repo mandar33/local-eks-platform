@@ -1,0 +1,91 @@
+# Region B, deployed by the same Argo CD that runs in region A (dev-cluster).
+#   kubectl apply -n argocd -f k8s-manifests/environments/region-b/argocd-apps.yaml
+# Needs the region-b cluster registered first: scripts/setup-region.sh.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: region-b-frontend-api
+  namespace: argocd
+  annotations:
+    # Lets Kargo's region-b Stage trigger syncs of this app.
+    kargo.akuity.io/authorized-stage: local-eks-platform:region-b
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/charts/base-api
+    helm:
+      releaseName: frontend-api
+      valueFiles:
+        - ../../environments/dev/frontend-values.yaml
+        - ../../environments/region-b/frontend-values.yaml
+  destination:
+    name: region-b
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: region-b-crud-api
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/charts/base-api
+    helm:
+      releaseName: crud-api
+      valueFiles:
+        - ../../environments/dev/crud-values.yaml
+        - ../../environments/region-b/crud-values.yaml
+  destination:
+    name: region-b
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: region-b-networking
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/environments/region-b/networking
+  destination:
+    name: region-b
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: region-b-secrets
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/environments/region-b/secrets
+  destination:
+    name: region-b
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

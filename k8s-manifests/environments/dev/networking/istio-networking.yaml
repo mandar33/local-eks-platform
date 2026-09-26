@@ -53,6 +53,10 @@ spec:
         subset: canary
         port:
           number: 80
+    headers:
+      response:
+        set:
+          x-region: a
   - name: weighted
     route:
     - destination:
@@ -67,6 +71,10 @@ spec:
         port:
           number: 80
       weight: 0
+    headers:
+      response:
+        set:
+          x-region: a
 ---
 # Same split for calls from inside the mesh. Keep the weights in step with
 # frontend-routing above.

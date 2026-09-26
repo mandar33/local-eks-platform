@@ -1,0 +1,5 @@
+# Layered on top of ../dev/crud-values.yaml. Region B has no database of its
+# own: it reads region A's Postgres through a NodePort on the kind network.
+env:
+  DB_HOST: dev-cluster-control-plane
+  DB_PORT: "30432"
