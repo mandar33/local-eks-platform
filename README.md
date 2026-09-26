@@ -192,6 +192,7 @@ local-eks-platform/
 │       ├── cells/               # Cell a and Cell b
 │       ├── regions/             # NodePorts region B uses for Vault and Postgres
 │       └── region-b/            # Region B: values overrides, networking, secrets, Argo CD apps
+├── notes/                       # Findings, future improvements, EKS Auto Mode design
 ├── platform/vault/              # Helm values for Vault
 ├── platform/global-lb/          # nginx config for the global load balancer
 ├── platform/github-runner/      # Dockerfile for the self-hosted CI runner
@@ -697,7 +698,15 @@ Every step of the flow was tested in one continuous run on 26 Sep 2026, then und
 7. **Failover:** with region A's gateway at 0 replicas, all requests through `localhost:7080` were answered by region B.
 8. **Undo:** the code revert went through CI (run 6, `1.2.6`), `dev` and `region-b`.
 
-Not yet tested: a clean rebuild from an empty laptop using "Setup from scratch".
+Not yet tested: a clean rebuild from an empty laptop using "Setup from scratch". It's first on the list in [notes/future-improvements.md](notes/future-improvements.md).
+
+## Notes: findings, next steps, and AWS
+
+| Note | What's in it |
+|---|---|
+| [notes/findings.md](notes/findings.md) | Every problem hit while building this (Norton, cgroup v1, canary 503s, Vault Secrets Operator after a seal, stale DB connections, and more): cause, fix, and where it's handled now. Plus measured timings. |
+| [notes/future-improvements.md](notes/future-improvements.md) | Known gaps, starting with the untested clean rebuild; resilience, security and delivery improvements. |
+| [notes/eks-auto-mode.md](notes/eks-auto-mode.md) | How each part behaves on Amazon EKS Auto Mode with ECR, CI via GitHub OIDC, Kargo and Argo CD: what stays, what changes, what to plan for, and a migration order. |
 
 ## Renewals
 
