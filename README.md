@@ -17,6 +17,7 @@ It's meant for learning how the usual EKS building blocks fit together without a
 | **Flipt** | Light switches for features: the code has both paths, a flag picks one, no redeploy needed. | `enable-new-schema` chooses between the v1 and v2 database tables. |
 | **Argo CD** | A thermostat set by Git: it keeps comparing the cluster with Git, and fixes any difference. | Deploys everything in `k8s-manifests/`; undoes manual changes. |
 | **Zot** | A private warehouse for app images; a tag like `1.1.2` is the label on a box. | Stores the app images at `localhost:5001` and scans them for known vulnerabilities. |
+| **GitHub Actions (CI)** | A factory line that starts on every code push: builds, inspects, stores, then waits for your approval. | Builds and scans both images on a runner on your laptop, pushes them to Zot, asks Kargo to promote. |
 | **Kargo** | A release manager: notices new images and, when you approve, moves a version environment by environment, writing each move into Git. | Promotes `frontend-api` to `dev`, then to `region-b`. |
 | **Vault** | A safe that hands out short-lived keys instead of shared passwords. | Creates a temporary database user for each crud-api. |
 | **Crossplane** | Lets you define your own "order form" (here a `Cell`) that expands into many resources. | One `Cell` becomes a namespace, two apps, credentials and access rules. |
@@ -68,26 +69,31 @@ flowchart LR
 
 ### Delivery flow
 
-How a new version gets from your laptop into the cluster:
+How a code change becomes a running pod. You do two things: push, and approve.
 
 ```mermaid
 flowchart LR
-    dev([You]) -->|"docker push<br/>localhost:5001/frontend-api:1.0.2"| zot[(Zot registry<br/>namespace registry)]
-    zot -->|new SemVer tag| wh[Kargo Warehouse<br/>frontend-images]
-    wh -->|Freight| stage[Kargo Stage dev]
-    stage -->|"commit image.tag: 1.0.2<br/>to frontend-values.yaml"| gh[(GitHub<br/>mandar33/local-eks-platform)]
-    stage -->|trigger sync| argo[Argo CD]
-    gh -->|chart + values| argo
-    gh -->|"feature-flags/features.yaml<br/>polled every 30s"| flipt[Flipt]
-    argo -->|apply + self-heal| k8s[Cluster]
-    zot -->|"nodes pull localhost:5001/*<br/>via containerd mirror"| k8s
+    dev([You]) -->|"git push apps/"| gh[(GitHub)]
+    gh -->|workflow| runner["GitHub Actions runner<br/>(Docker, on your laptop)"]
+    runner -->|"build + push 1.2.N<br/>(password from Vault)"| zot[(Zot registry)]
+    zot -->|"scan: fail on high/critical"| runner
+    runner -->|"waits for your Approve<br/>(environment dev)"| stage[Kargo Stage dev]
+    zot -->|new SemVer tag| wh[Kargo Warehouse] -->|Freight| stage
+    stage -->|"commit image.tag"| gh
+    gh -->|chart + values| argo[Argo CD]
+    argo -->|apply| k8s[Cluster]
+    zot -->|"nodes pull images"| k8s
+    gh -->|"features.yaml, every 30s"| flipt[Flipt]
 ```
 
-1. You build an image and push it to Zot with a new version tag.
-2. Kargo's Warehouse notices the tag and records it as **Freight**.
-3. You promote the Freight to the `dev` Stage (UI, CLI or a `Promotion` resource).
-4. The Stage clones this repo, sets `image.tag` in `frontend-values.yaml`, commits as "Kargo", pushes, and asks Argo CD to sync.
-5. Argo CD rolls out the Deployment, and the kind nodes pull the image from Zot.
+1. You push a change under `apps/`. GitHub starts `.github/workflows/build.yml` on the self-hosted runner in Docker on your laptop.
+2. The runner builds both images as `1.2.<run number>`, reads the registry password from Vault, and pushes them to Zot.
+3. Zot scans them. Any high or critical vulnerability fails the run.
+4. The run waits in the `dev` environment until you click **Approve** on GitHub.
+5. The runner asks Kargo to promote the new version (Freight) to the `dev` Stage.
+6. Kargo sets `image.tag` in `frontend-values.yaml`, commits as "Kargo", pushes, and asks Argo CD to sync.
+7. Argo CD renders the Helm chart and rolls out the Deployment; the kind nodes pull the image from Zot.
+8. Later, you promote the same version to `region-b` (Kargo refuses until `dev` has it).
 
 Git stays the record of what runs where: every promotion is a commit you can read, revert or audit.
 
@@ -141,6 +147,7 @@ flowchart TB
 | [Vault](https://developer.hashicorp.com/vault) | 2.0.4 (chart 0.34.1) | `vault` | Issues short-lived Postgres users; stores the registry login and Kargo's GitHub token. |
 | [Vault Secrets Operator](https://developer.hashicorp.com/vault/docs/platform/k8s/vso) | 1.6.0 | `vault-secrets-operator-system` | Copies secrets from Vault into Kubernetes Secrets, and restarts apps when they change. |
 | [Zot](https://zotregistry.dev/) | v2.1.21 | `registry` | Private OCI registry for the app images: TLS, anonymous pull, authenticated push, web UI, vulnerability scanning. |
+| [GitHub Actions](https://docs.github.com/actions) runner | 2.337.0 | Docker container `github-runner` | Runs the CI workflow on your laptop: builds, scans, pushes to Zot, promotes via Kargo. |
 | [Kargo](https://kargo.io/) | 1.11.4 | `kargo` | Watches Zot for new `frontend-api` tags and promotes them into `dev` through Git. |
 | [cert-manager](https://cert-manager.io/) | v1.21.2 | `cert-manager` | Issues Zot's TLS certificate (from a cluster-local CA) and Kargo's webhook certificates. |
 | [metrics-server](https://github.com/kubernetes-sigs/metrics-server) | latest chart | `kube-system` | Supplies CPU metrics to the HPAs. |
@@ -161,6 +168,8 @@ Both are FastAPI apps listening on port 8000, deployed from `localhost:5001/<app
 
 ```
 local-eks-platform/
+├── .github/workflows/build.yml  # CI: build, scan, push, approve, promote
+├── azure-pipelines.yml          # The same pipeline in Azure DevOps syntax (not connected; for comparison)
 ├── apps/
 │   ├── frontend-api/            # FastAPI app, Dockerfile, requirements.txt
 │   └── crud-api/                # FastAPI app, Dockerfile, requirements.txt
@@ -185,11 +194,14 @@ local-eks-platform/
 │       └── region-b/            # Region B: values overrides, networking, secrets, Argo CD apps
 ├── platform/vault/              # Helm values for Vault
 ├── platform/global-lb/          # nginx config for the global load balancer
+├── platform/github-runner/      # Dockerfile for the self-hosted CI runner
 ├── scripts/
 │   ├── bootstrap-vault.sh       # Install + configure Vault; `unseal` after restarts
 │   ├── setup-registry.sh        # Registry login in Vault, node mirrors, docker login
 │   ├── set-kargo-git-token.sh   # Store Kargo's GitHub token in Vault (hidden prompt)
 │   ├── setup-region.sh          # Register region-b with Argo CD and Vault; start global-lb
+│   ├── setup-ci.sh              # Build + register the CI runner; repo safety settings; approval environment
+│   ├── flag.sh                  # Ask Flipt about the flag in plain English (flag.sh 1, flag.sh users)
 │   └── lib.sh                   # Shared helpers
 ├── kind-config.yaml             # Region A: ports 8080, 8443, 5001; registry mirrors
 ├── kind-config-region-b.yaml    # Region B: ports 9080, 9443
@@ -284,6 +296,9 @@ scripts/set-kargo-git-token.sh
 helm repo add crossplane-stable https://charts.crossplane.io/stable
 helm upgrade --install crossplane crossplane-stable/crossplane --version 2.4.2 \
   -n crossplane-system --create-namespace --wait
+
+# 13. CI: runner in Docker, registered with `gh` (must be logged in as the repo owner)
+scripts/setup-ci.sh
 
 kubectl get applications -n argocd -w     # wait for everything: Synced / Healthy
 ```
@@ -420,18 +435,20 @@ kubectl exec curl -c curl -- curl -s http://frontend-api-svc/healthz
 ### Feature flags (Flipt)
 
 ```bash
-kubectl exec curl -c curl -- curl -s -X POST \
-  http://flipt.default.svc.cluster.local:8080/evaluate/v1/boolean \
-  -H 'Content-Type: application/json' \
-  -d '{"namespaceKey":"default","flagKey":"enable-new-schema","entityId":"1","context":{}}'
-# {"enabled":true, "reason":"DEFAULT_EVALUATION_REASON", ...}
+scripts/flag.sh 1          # user 1   ON   (no rule matched, so the flag's default)
+scripts/flag.sh 2 beta     # the same question for a user on the "beta" plan
+scripts/flag.sh users      # users 1 to 8 at once
 ```
+
+`flag.sh` asks Flipt exactly what the frontend asks, from a small in-cluster pod, and prints the answer in plain English. The raw call is a `POST` to `http://flipt.default.svc.cluster.local:8080/evaluate/v1/boolean` with `{"namespaceKey":"default","flagKey":"enable-new-schema","entityId":"1","context":{}}`.
 
 To change a flag, edit `feature-flags/features.yaml`, commit and push. Flipt picks it up within about 30 seconds (17 in testing). Region B runs its own Flipt, so for a few seconds the two regions can give different answers. For example, set `enabled: false` and `curl localhost:8080/users/1` returns `{"id":1,"standard_data":"Alice (v1 schema)"}`. Percentage rollouts and segments go under `rollouts:` on the flag. See the [Flipt docs](https://docs.flipt.io/).
 
 If Flipt crash-loops after a push, the file has a field Flipt doesn't accept. `kubectl logs deploy/flipt -c flipt` names the line.
 
 ### Argo CD
+
+The clearest way to see Argo CD work: change one number in Git and watch the cluster follow. Set `minReplicas: 2` in `frontend-values.yaml`, commit, push, then `kubectl get pods -l app=frontend-api -w`. A second pod appeared 129 seconds later in testing (Argo CD's regular check of Git). Revert it and make Argo CD look straight away with `kubectl annotate application frontend-api-dev -n argocd argocd.argoproj.io/refresh=normal --overwrite`: 3 seconds. Note that the cells use the same values file, so they follow the change too.
 
 ```bash
 kubectl get applications -n argocd                 # all Synced / Healthy
@@ -452,6 +469,27 @@ kubectl annotate application frontend-api-dev -n argocd argocd.argoproj.io/refre
 ```
 
 A hand-made revert isn't known to Kargo, which still lists the newer Freight for `dev`. To roll back a promoted version properly, promote the older Freight in Kargo. For about a minute after any rollout, the app shows `Degraded` and Kargo's Stage `Unhealthy`, because the new pod has no CPU metrics yet.
+
+### CI (GitHub Actions)
+
+```bash
+docker ps --filter name=github-runner          # the runner
+gh run list --limit 3                          # recent runs
+gh run watch                                   # follow a run live
+```
+
+Try it: change `healthz` in `apps/frontend-api/main.py` to return `{"status": "ok", "hello": "from CI"}`, commit and push. The run builds and scans both images as `1.2.<run number>`, then waits. Approve it on GitHub (Actions → the run → **Review deployments** → dev → **Approve and deploy**). Then:
+
+```bash
+git pull && git log --oneline -1       # dev: frontend-api 1.2.3 (promoted by Kargo)
+curl -s -D - localhost:8080/healthz    # x-app-version: 1.2.3 ... {"status":"ok","hello":"from CI"}
+```
+
+Tested end to end, including the undo (run 4, `1.2.4`). The first real fix shipped this way was crud-api's `pool_pre_ping`, for a `connection is closed` error after idle periods.
+
+**Security on a public repo.** The runner executes code on your laptop, and anyone can open a pull request on a public repo. So the workflow runs only on pushes to `main` and manual starts, never on pull requests; outside contributors' runs need approval; and the runner holds only a Vault token that can read the registry password and a Kubernetes identity (`ci-promoter`) that can only create Kargo promotions. GitHub stores no secrets for it.
+
+**Coming from Azure DevOps?** `azure-pipelines.yml` is the same pipeline in Azure Pipelines syntax, with a mapping table at the top (trigger ↔ `on`, stages/jobs ↔ jobs, agent pool ↔ runner labels, deployment job + environment approvals ↔ `environment:` with required reviewers, `$(Build.BuildId)` ↔ `github.run_number`). It isn't connected to anything; it's there to compare.
 
 ### Hardened images
 
@@ -669,6 +707,10 @@ After a successful promotion:
 | Argo CD sync fails with `field is immutable` on a Deployment `selector` | The chart changed the Deployment's labels (for example adding `track`) | Delete the Deployment once; Argo CD recreates it (a few seconds of downtime) |
 | Disabled canary still running, app `OutOfSync` | Argo CD won't auto-sync an app down to zero resources | `allowEmpty: true` on the canary app (already set) |
 | `Cell` stays `READY False` | Crossplane only sees a `Ready` condition; Argo CD apps and AuthorizationPolicies don't have one | The Composition sets readiness from Argo CD health (already set) |
+| CI run stuck in "Queued" | The runner container isn't running | `docker ps -a --filter name=github-runner`; `scripts/setup-ci.sh runner` recreates it |
+| CI fails at "Log in to Zot" with `403` from Vault | The runner's Vault token expired (30 days) or Vault is sealed | `scripts/bootstrap-vault.sh unseal`, then `scripts/setup-ci.sh runner` |
+| CI stops at the scan step | Zot found a high or critical vulnerability | Update the base image or the dependency it names, push again |
+| A single `500` after the app sat idle, then fine | Stale DB connection closed by the sidecar (fixed in crud-api 1.2.2 with `pool_pre_ping`) | Use crud-api 1.2.2 or later |
 | `global-lb` doesn't start from Git Bash | Docker for Windows got a `/c/...` path | Fixed in `setup-region.sh` with `cygpath` |
 
 ## Secrets
@@ -683,6 +725,8 @@ After a successful promotion:
 | `crud-api` DB user + password | Vault's database engine, on request | `default/crud-db` Secret, written by the Vault Secrets Operator | `crud-api` pods |
 | Registry push login (`pusher`) | `setup-registry.sh` (random) | Vault `kv/registry/pusher`; Zot gets only a bcrypt hash via `kv/registry/htpasswd` | You, through `setup-registry.sh login` |
 | Kargo's GitHub token | You, at a hidden prompt | Vault `kv/kargo/github`, copied to `local-eks-platform/github-creds` | Kargo |
+| CI runner's Vault token | `setup-ci.sh` (policy `ci-registry`: read `kv/registry/pusher` only, 30 days) | Inside the `github-runner` container only | The runner |
+| CI runner's Kubernetes identity | ServiceAccount `ci-promoter` (read Freight, create Promotions) | Kubeconfig inside the `github-runner` container only | The runner |
 | Region B's Argo CD and Vault reviewer tokens | `setup-region.sh`, as ServiceAccount tokens in region B | `argocd/cluster-region-b` Secret; Vault `auth/kubernetes-region-b/config` | Argo CD; Vault |
 | Vault unseal key + root token | `vault operator init` | `~/.local-eks-platform/vault-init.json`, outside the repo | You |
 | Argo CD admin password | Argo CD install | `argocd/argocd-initial-admin-secret` | Cluster admins |
