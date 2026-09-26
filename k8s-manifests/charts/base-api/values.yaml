@@ -3,6 +3,14 @@ nameOverride: "default-api"
 image:
   repository: "your-registry/default"
   tag: "latest"
+# stable: the normal release (Deployment, Service, HPA, ServiceAccount).
+# canary: an extra Deployment named <nameOverride>-canary that shares the
+#         stable release's Service and ServiceAccount. Istio decides how much
+#         traffic it gets (see environments/dev/networking/).
+track: stable
+canary:
+  enabled: true
+  replicas: 1
 autoscaling:
   minReplicas: 2
   maxReplicas: 10

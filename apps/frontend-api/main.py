@@ -8,6 +8,15 @@ app = FastAPI()
 FLIPT_URL = os.getenv("FLIPT_URL", "http://flipt.default.svc.cluster.local:8080")
 CRUD_API_URL = os.getenv("CRUD_API_URL", "http://crud-api-svc.default.svc.cluster.local")
 FLIPT_NAMESPACE = os.getenv("FLIPT_NAMESPACE", "default")
+# Set by the Helm chart from the pod's `version` label (v1 stable, v2 canary).
+APP_VERSION = os.getenv("APP_VERSION", "unknown")
+
+
+@app.middleware("http")
+async def add_version_header(request, call_next):
+    response = await call_next(request)
+    response.headers["x-app-version"] = APP_VERSION
+    return response
 
 
 async def is_feature_enabled(flag_key: str, user_id: str) -> bool:

@@ -13,6 +13,25 @@ spec:
     hosts:
     - "*"
 ---
+# Two groups of frontend pods, told apart by the chart's `track` label.
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: frontend-api
+spec:
+  host: frontend-api-svc.default.svc.cluster.local
+  subsets:
+  - name: stable
+    labels:
+      track: stable
+  - name: canary
+    labels:
+      track: canary
+---
+# Traffic from the gateway (users). Canary weight lives here:
+#   0   = canary gets nothing (use this when canary.enabled is false)
+#   10  = one request in ten goes to the canary
+# `x-canary: always` sends a request to the canary regardless of weight.
 apiVersion: networking.istio.io/v1
 kind: VirtualService
 metadata:
@@ -23,14 +42,63 @@ spec:
   hosts:
   - "*"
   http:
-  - match:
-    - uri:
-        prefix: /
+  - name: force-canary
+    match:
+    - headers:
+        x-canary:
+          exact: always
     route:
     - destination:
-        host: frontend-api-svc
+        host: frontend-api-svc.default.svc.cluster.local
+        subset: canary
         port:
           number: 80
+  - name: weighted
+    route:
+    - destination:
+        host: frontend-api-svc.default.svc.cluster.local
+        subset: stable
+        port:
+          number: 80
+      weight: 90
+    - destination:
+        host: frontend-api-svc.default.svc.cluster.local
+        subset: canary
+        port:
+          number: 80
+      weight: 10
+---
+# Same split for calls from inside the mesh. Keep the weights in step with
+# frontend-routing above.
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: frontend-api-mesh
+spec:
+  gateways:
+  - mesh
+  hosts:
+  - frontend-api-svc.default.svc.cluster.local
+  http:
+  - name: force-canary
+    match:
+    - headers:
+        x-canary:
+          exact: always
+    route:
+    - destination:
+        host: frontend-api-svc.default.svc.cluster.local
+        subset: canary
+  - name: weighted
+    route:
+    - destination:
+        host: frontend-api-svc.default.svc.cluster.local
+        subset: stable
+      weight: 90
+    - destination:
+        host: frontend-api-svc.default.svc.cluster.local
+        subset: canary
+      weight: 10
 ---
 apiVersion: security.istio.io/v1beta1
 kind: AuthorizationPolicy

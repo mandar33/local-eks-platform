@@ -1,0 +1,12 @@
+# Layered on top of frontend-values.yaml by the frontend-api-canary-dev app.
+# Canary workflow (each step is a commit):
+#   1. set canary.enabled: true and the new image.tag below
+#   2. raise the canary weight in networking/istio-networking.yaml (e.g. 10)
+#   3. if it behaves, promote the same tag to stable with Kargo
+#   4. set the canary weight back to 0 and canary.enabled: false
+track: canary
+canary:
+  enabled: true
+  replicas: 1
+image:
+  tag: 1.1.1

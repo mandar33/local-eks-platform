@@ -1,10 +1,12 @@
+{{- if ne .Values.track "canary" }}
 apiVersion: v1
 kind: Service
 metadata:
   # This exact name is what Istio and the internal DNS use for routing
-  name: {{ .Values.nameOverride }}-svc 
-  namespace: default
+  name: {{ .Values.nameOverride }}-svc
+  namespace: {{ .Release.Namespace }}
 spec:
+  # Selects stable and canary pods; Istio subsets split traffic by `track`.
   selector:
     app: {{ .Values.nameOverride }}
   ports:
@@ -12,3 +14,4 @@ spec:
       protocol: TCP
       port: 80
       targetPort: 8000
+{{- end }}

@@ -1,18 +1,25 @@
+{{- if or (ne .Values.track "canary") .Values.canary.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Values.nameOverride }}
-  namespace: default
+  name: {{ include "base-api.deploymentName" . }}
+  namespace: {{ .Release.Namespace }}
 spec:
-  # No `replicas`: the HPA owns the replica count (minReplicas..maxReplicas).
+  {{- if eq .Values.track "canary" }}
+  replicas: {{ .Values.canary.replicas }}
+  {{- end }}
+  # Stable has no `replicas`: the HPA owns the replica count.
   selector:
     matchLabels:
       app: {{ .Values.nameOverride }}
+      track: {{ .Values.track }}
   template:
     metadata:
       labels:
         app: {{ .Values.nameOverride }}
-        version: v1
+        track: {{ .Values.track }}
+        # Istio uses `version` in telemetry; the image tag is the version.
+        version: {{ .Values.image.tag | quote }}
     spec:
       serviceAccountName: {{ .Values.nameOverride }}
       containers:
@@ -20,8 +27,10 @@ spec:
         image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
         ports:
         - containerPort: 8000
-        {{- if or .Values.env .Values.secretEnv }}
         env:
+        # Returned by frontend-api as the x-app-version response header.
+        - name: APP_VERSION
+          value: {{ .Values.image.tag | quote }}
         {{- range $name, $value := .Values.env }}
         - name: {{ $name }}
           value: {{ $value | quote }}
@@ -32,7 +41,6 @@ spec:
             secretKeyRef:
               name: {{ $ref.secret }}
               key: {{ $ref.key }}
-        {{- end }}
         {{- end }}
         readinessProbe:
           httpGet:
@@ -48,3 +56,4 @@ spec:
         resources:
           requests:
             cpu: "100m"
+{{- end }}

@@ -2,7 +2,8 @@
 # The API apps render charts/base-api with their own values file;
 # platform-networking-dev syncs networking/ (Istio), postgres-dev syncs data/,
 # vault-secrets-dev syncs secrets/ (Vault Secrets Operator resources),
-# registry-dev syncs registry/ (Zot), kargo-dev syncs kargo/ (promotions).
+# registry-dev syncs registry/ (Zot), kargo-dev syncs kargo/ (promotions),
+# frontend-api-canary-dev runs the frontend canary (frontend-canary-values.yaml).
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -167,3 +168,28 @@ spec:
         duration: 15s
         factor: 2
         maxDuration: 5m
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: frontend-api-canary-dev
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/charts/base-api
+    helm:
+      releaseName: frontend-api-canary
+      # Same values as stable, then the canary overrides on top.
+      valueFiles:
+        - ../../environments/dev/frontend-values.yaml
+        - ../../environments/dev/frontend-canary-values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
