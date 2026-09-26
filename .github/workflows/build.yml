@@ -1,0 +1,122 @@
+# CI for the two apps, on the self-hosted runner (scripts/setup-ci.sh).
+#
+#   push to main touching apps/  ->  build  ->  push to Zot  ->  scan
+#                                ->  wait for your approval ("dev" environment)
+#                                ->  Kargo promotes frontend-api to dev
+#
+# Security: this runs on your laptop, so it never runs on pull requests (anyone
+# can open one on a public repo). Only pushes to main, or a manual run, start it.
+# Compare with azure-pipelines.yml, the same pipeline in Azure DevOps syntax.
+name: build-and-promote
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/**"
+      - ".github/workflows/build.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-and-promote
+  cancel-in-progress: false
+
+env:
+  # SemVer so Kargo's Warehouse (constraint ^1.0.0) picks it up as the newest.
+  VERSION: 1.2.${{ github.run_number }}
+  # The runner sits on the "kind" Docker network, so it uses node names.
+  VAULT_ADDR: http://dev-cluster-control-plane:30820
+  ZOT_API: https://dev-cluster-control-plane:30500
+  KUBECONFIG: /home/runner/.ci/kubeconfig
+
+jobs:
+  build:
+    name: Build ${{ matrix.app }}
+    runs-on: [self-hosted, local-eks-platform]
+    strategy:
+      matrix:
+        app: [frontend-api, crud-api]
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Log in to Zot (password read from Vault, never stored in GitHub)
+        run: |
+          curl -fsS -H "X-Vault-Token: $(cat /home/runner/.ci/vault-token)" \
+            "$VAULT_ADDR/v1/kv/data/registry/pusher" \
+          | jq -r .data.data.password \
+          | docker login localhost:5001 --username pusher --password-stdin
+
+      - name: Build the image
+        run: docker build -t "localhost:5001/${{ matrix.app }}:$VERSION" "apps/${{ matrix.app }}"
+
+      - name: Push to Zot
+        run: docker push "localhost:5001/${{ matrix.app }}:$VERSION"
+
+      - name: Fail on high or critical vulnerabilities
+        run: |
+          query="{\"query\":\"{ CVEListForImage(image: \\\"${{ matrix.app }}:$VERSION\\\") { Summary { Count HighCount CriticalCount } } }\"}"
+          # Zot scans in the background; ask until it has an answer.
+          for _ in $(seq 1 30); do
+            summary=$(curl -fsSk -X POST "$ZOT_API/v2/_zot/ext/search" -H 'Content-Type: application/json' -d "$query" \
+              | jq -c '.data.CVEListForImage.Summary // empty')
+            [ -n "$summary" ] && break
+            sleep 5
+          done
+          echo "Scan of ${{ matrix.app }}:$VERSION: $summary"
+          [ -n "$summary" ] || { echo "No scan result from Zot"; exit 1; }
+          bad=$(echo "$summary" | jq '.HighCount + .CriticalCount')
+          if [ "$bad" -gt 0 ]; then
+            echo "::error::${{ matrix.app }}:$VERSION has $bad high/critical vulnerabilities"
+            exit 1
+          fi
+
+      - name: Log out of Zot
+        if: always()
+        run: docker logout localhost:5001
+
+  promote-dev:
+    name: Promote frontend-api to dev
+    needs: build
+    runs-on: [self-hosted, local-eks-platform]
+    # Pauses here until a reviewer approves (Settings > Environments > dev).
+    environment: dev
+    steps:
+      - name: Wait for Kargo to see the new image
+        run: |
+          kubectl annotate warehouse frontend-images kargo.akuity.io/refresh="$(date +%s)" --overwrite
+          for _ in $(seq 1 36); do
+            freight=$(kubectl get freight -o json \
+              | jq -r --arg v "$VERSION" '.items[] | select(.images[0].tag == $v) | .metadata.name')
+            [ -n "$freight" ] && break
+            sleep 5
+          done
+          [ -n "$freight" ] || { echo "::error::Kargo never saw frontend-api:$VERSION"; exit 1; }
+          echo "FREIGHT=$freight" >> "$GITHUB_ENV"
+
+      - name: Promote to dev
+        run: |
+          promotion=$(kubectl create -o name -f - <<EOF
+          apiVersion: kargo.akuity.io/v1alpha1
+          kind: Promotion
+          metadata:
+            generateName: dev-
+          spec:
+            stage: dev
+            freight: $FREIGHT
+          EOF
+          )
+          echo "Created $promotion"
+          for _ in $(seq 1 60); do
+            phase=$(kubectl get "$promotion" -o jsonpath='{.status.phase}')
+            case "$phase" in
+              Succeeded) echo "frontend-api $VERSION is promoted to dev"; exit 0 ;;
+              Failed|Errored|Aborted)
+                echo "::error::Promotion $phase: $(kubectl get "$promotion" -o jsonpath='{.status.message}')"; exit 1 ;;
+            esac
+            sleep 5
+          done
+          echo "::error::Promotion didn't finish in 5 minutes"; exit 1

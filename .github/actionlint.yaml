@@ -1,0 +1,4 @@
+# actionlint config: the custom label of the self-hosted runner (scripts/setup-ci.sh)
+self-hosted-runner:
+  labels:
+    - local-eks-platform

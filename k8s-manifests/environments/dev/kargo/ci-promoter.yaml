@@ -1,0 +1,52 @@
+# Identity the GitHub Actions runner uses to promote in Kargo. It can read
+# Freight and Stages, nudge the Warehouse to look for new images, and create
+# Promotions in this project, nothing else. scripts/setup-ci.sh turns the
+# token below into a kubeconfig inside the runner container.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ci-promoter
+  namespace: local-eks-platform
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ci-promoter-token
+  namespace: local-eks-platform
+  annotations:
+    kubernetes.io/service-account.name: ci-promoter
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ci-promoter
+  namespace: local-eks-platform
+rules:
+  - apiGroups: ["kargo.akuity.io"]
+    resources: ["freights", "stages"]
+    verbs: ["get", "list", "watch"]
+  # Kargo checks this custom verb before accepting a Promotion.
+  - apiGroups: ["kargo.akuity.io"]
+    resources: ["stages"]
+    verbs: ["promote"]
+  - apiGroups: ["kargo.akuity.io"]
+    resources: ["warehouses"]
+    verbs: ["get", "patch"]
+  - apiGroups: ["kargo.akuity.io"]
+    resources: ["promotions"]
+    verbs: ["create", "get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ci-promoter
+  namespace: local-eks-platform
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ci-promoter
+subjects:
+  - kind: ServiceAccount
+    name: ci-promoter
+    namespace: local-eks-platform
