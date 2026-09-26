@@ -40,7 +40,7 @@ async def is_feature_enabled(flag_key: str, user_id: str) -> bool:
 
 @app.get("/healthz")
 async def healthz():
-    return {"status": "ok"}
+    return {"status": "ok", "hello": "from CI"}
 
 
 @app.get("/users/{user_id}")
