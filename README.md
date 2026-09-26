@@ -202,6 +202,7 @@ local-eks-platform/
 │   ├── setup-region.sh          # Register region-b with Argo CD and Vault; start global-lb
 │   ├── setup-ci.sh              # Build + register the CI runner; repo safety settings; approval environment
 │   ├── flag.sh                  # Ask Flipt about the flag in plain English (flag.sh 1, flag.sh users)
+│   ├── check-expiry.sh          # When the CI token, Kargo's GitHub token and certificates expire
 │   └── lib.sh                   # Shared helpers
 ├── kind-config.yaml             # Region A: ports 8080, 8443, 5001; registry mirrors
 ├── kind-config-region-b.yaml    # Region B: ports 9080, 9443
@@ -682,6 +683,18 @@ After a successful promotion:
 - Run `git pull` before your next local commit, since Kargo pushed to `main`.
 
 **Shipping a real code change** is the same loop: edit `apps/frontend-api`, then `docker build -t localhost:5001/frontend-api:1.0.2 apps/frontend-api && docker push localhost:5001/frontend-api:1.0.2`, and promote the new Freight.
+
+## Renewals
+
+Two credentials expire and must be renewed by hand. `scripts/check-expiry.sh` prints the current dates (secrets never leave Vault; it only reads the expiry).
+
+| Credential | Expires | Symptom | Renew with |
+|---|---|---|---|
+| CI runner's Vault token | 30 days after `setup-ci.sh` (next: 2026-10-26) | CI fails at "Log in to Zot" with `403` | `scripts/setup-ci.sh runner` |
+| Kargo's GitHub token | The date chosen on GitHub (next: 2026-12-25) | Promotions fail with `Invalid username or token` | New fine-grained token (this repo, Contents read/write), then `scripts/set-kargo-git-token.sh` |
+| Vault seal | Every Docker or laptop restart | `vault-0` shows `0/1` | `scripts/bootstrap-vault.sh unseal` |
+
+Renewed automatically: crud-api's DB users (hourly), Zot's TLS certificate (2027) and the registry CA (2036; after it renews, run `scripts/setup-registry.sh nodes` once).
 
 ## Troubleshooting
 
