@@ -12,7 +12,10 @@ DATABASE_URL = "postgresql+asyncpg://{user}:{password}@{host}:{port}/{name}".for
     port=os.getenv("DB_PORT", "5432"),
     name=os.getenv("DB_NAME", "crud"),
 )
-engine = create_async_engine(DATABASE_URL)
+# pool_pre_ping: check a pooled connection before using it. Idle connections
+# get closed (for example by the Istio sidecar), and without this the first
+# request after a quiet spell fails with "connection is closed".
+engine = create_async_engine(DATABASE_URL, pool_pre_ping=True)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 app = FastAPI()
