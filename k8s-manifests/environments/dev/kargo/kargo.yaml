@@ -78,6 +78,54 @@ spec:
               - name: frontend-api-dev
                 namespace: argocd
 ---
+# Region B only accepts Freight that has already been promoted to dev, so a
+# release reaches regions one at a time: dev (region A) first, then region B.
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: region-b
+  namespace: local-eks-platform
+spec:
+  requestedFreight:
+    - origin:
+        kind: Warehouse
+        name: frontend-images
+      sources:
+        stages:
+          - dev
+  promotionTemplate:
+    spec:
+      vars:
+        - name: gitRepo
+          value: https://github.com/mandar33/local-eks-platform.git
+        - name: image
+          value: zot.registry.svc.cluster.local:5000/frontend-api
+      steps:
+        - uses: git-clone
+          config:
+            repoURL: ${{ vars.gitRepo }}
+            checkout:
+              - branch: main
+                path: ./repo
+        - uses: yaml-update
+          config:
+            path: ./repo/k8s-manifests/environments/region-b/frontend-values.yaml
+            updates:
+              - key: image.tag
+                value: ${{ imageFrom(vars.image).Tag }}
+        - uses: git-commit
+          config:
+            path: ./repo
+            message: "region-b: frontend-api ${{ imageFrom(vars.image).Tag }} (promoted by Kargo)"
+        - uses: git-push
+          config:
+            path: ./repo
+        - uses: argocd-update
+          config:
+            apps:
+              - name: region-b-frontend-api
+                namespace: argocd
+---
 # GitHub credentials: Vault -> Vault Secrets Operator -> labelled Secret.
 apiVersion: v1
 kind: ServiceAccount

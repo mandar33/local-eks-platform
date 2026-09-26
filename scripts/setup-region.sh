@@ -103,7 +103,10 @@ setup_lb() {
   docker rm -f global-lb >/dev/null 2>&1 || true
   docker create --name global-lb --restart unless-stopped --network kind \
     -p 127.0.0.1:7080:7080 "$LB_IMAGE" >/dev/null
-  docker cp "$REPO_ROOT/platform/global-lb/nginx.conf" global-lb:/etc/nginx/nginx.conf
+  local conf="$REPO_ROOT/platform/global-lb/nginx.conf"
+  # Docker for Windows needs a Windows path (Git Bash path conversion is off).
+  command -v cygpath >/dev/null 2>&1 && conf="$(cygpath -w "$conf")"
+  docker cp "$conf" global-lb:/etc/nginx/nginx.conf
   docker start global-lb >/dev/null
   echo "http://localhost:7080 spreads requests across both regions and fails over."
 }
