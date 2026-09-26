@@ -60,7 +60,7 @@ spec:
         subset: stable
         port:
           number: 80
-      weight: 00
+      weight: 100
     - destination:
         host: frontend-api-svc.default.svc.cluster.local
         subset: canary
@@ -94,7 +94,7 @@ spec:
     - destination:
         host: frontend-api-svc.default.svc.cluster.local
         subset: stable
-      weight: 00
+      weight: 100
     - destination:
         host: frontend-api-svc.default.svc.cluster.local
         subset: canary
