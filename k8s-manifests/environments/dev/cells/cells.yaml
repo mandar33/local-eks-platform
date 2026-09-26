@@ -16,11 +16,3 @@ metadata:
 spec:
   frontendTag: 1.1.1
   crudTag: 1.1.1
----
-apiVersion: platform.local/v1alpha1
-kind: Cell
-metadata:
-  name: c
-spec:
-  frontendTag: 1.2.5
-  crudTag: 1.2.2
