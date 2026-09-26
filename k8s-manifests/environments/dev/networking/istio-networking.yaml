@@ -64,13 +64,13 @@ spec:
         subset: stable
         port:
           number: 80
-      weight: 100
+      weight: 90
     - destination:
         host: frontend-api-svc.default.svc.cluster.local
         subset: canary
         port:
           number: 80
-      weight: 0
+      weight: 10
     headers:
       response:
         set:
@@ -102,11 +102,11 @@ spec:
     - destination:
         host: frontend-api-svc.default.svc.cluster.local
         subset: stable
-      weight: 100
+      weight: 90
     - destination:
         host: frontend-api-svc.default.svc.cluster.local
         subset: canary
-      weight: 0
+      weight: 10
 ---
 # Cell router for http://cells.localhost:8080. Real systems look the user up
 # in a routing table; here the user ID's last digit decides:
