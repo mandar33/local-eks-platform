@@ -427,7 +427,7 @@ kubectl exec curl -c curl -- curl -s -X POST \
 # {"enabled":true, "reason":"DEFAULT_EVALUATION_REASON", ...}
 ```
 
-To change a flag, edit `feature-flags/features.yaml`, commit and push. Flipt picks it up within about 30 seconds. For example, set `enabled: false` and `curl localhost:8080/users/1` returns `{"id":1,"standard_data":"Alice (v1 schema)"}`. Percentage rollouts and segments go under `rollouts:` on the flag. See the [Flipt docs](https://docs.flipt.io/).
+To change a flag, edit `feature-flags/features.yaml`, commit and push. Flipt picks it up within about 30 seconds (17 in testing). Region B runs its own Flipt, so for a few seconds the two regions can give different answers. For example, set `enabled: false` and `curl localhost:8080/users/1` returns `{"id":1,"standard_data":"Alice (v1 schema)"}`. Percentage rollouts and segments go under `rollouts:` on the flag. See the [Flipt docs](https://docs.flipt.io/).
 
 If Flipt crash-loops after a push, the file has a field Flipt doesn't accept. `kubectl logs deploy/flipt -c flipt` names the line.
 
@@ -445,7 +445,13 @@ kubectl port-forward svc/argocd-server -n argocd 8090:443
 kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d; echo
 ```
 
-**Rolling back** is a Git revert: `git revert <commit> && git push`, and Argo CD applies the previous state.
+**Rolling back** is a Git revert: `git revert <commit> && git push`, and Argo CD applies the previous state. Argo CD checks Git every few minutes (80 seconds in testing); to make it check now:
+
+```bash
+kubectl annotate application frontend-api-dev -n argocd argocd.argoproj.io/refresh=normal --overwrite
+```
+
+A hand-made revert isn't known to Kargo, which still lists the newer Freight for `dev`. To roll back a promoted version properly, promote the older Freight in Kargo. For about a minute after any rollout, the app shows `Degraded` and Kargo's Stage `Unhealthy`, because the new pod has no CPU metrics yet.
 
 ### Hardened images
 
@@ -463,18 +469,19 @@ The first Chainguard build (1.1.0) still had 3. They were in pip, which the buil
 The frontend has a second Deployment, `frontend-api-canary`, controlled by `frontend-canary-values.yaml`. Istio splits gateway traffic between the `stable` and `canary` pods by weight (`networking/istio-networking.yaml`), and the header `x-canary: always` forces the canary.
 
 ```bash
-# 1. Turn it on: canary.enabled: true and image.tag: <new tag> in frontend-canary-values.yaml,
-#    stable/canary weights 90/10 in both VirtualServices; commit, push.
-# 2. Count which version answers
+# 1. Pods first: canary.enabled: true and image.tag: <new tag> in frontend-canary-values.yaml;
+#    commit, push, wait for `kubectl get deploy frontend-api-canary` to show 1/1.
+# 2. Then traffic: stable/canary weights 90/10 in both VirtualServices; commit, push.
+# 3. Count which version answers
 for i in $(seq 1 200); do curl -s -o /dev/null -D - localhost:8080/users/1 | grep -i '^x-app-version' ; done | sort | uniq -c
-#     176 x-app-version: <stable tag>
-#      24 x-app-version: <canary tag>      (about 10%)
+#     174 x-app-version: <stable tag>
+#      26 x-app-version: <canary tag>      (about 10%)
 curl -s -o /dev/null -D - -H 'x-canary: always' localhost:8080/users/1 | grep -i '^x-app-version'
-# 3. Happy? Promote the same tag to stable with Kargo (below).
-# 4. Weights back to 100/0 and canary.enabled: false; commit, push. Argo CD removes the canary.
+# 4. Happy? Promote the same tag to stable with Kargo (below).
+# 5. Reverse order to switch off: weights back to 100/0 (commit, push, wait), then canary.enabled: false.
 ```
 
-If you set weights while `canary.enabled` is false, the canary share gets `503`: there are no canary pods to send it to.
+**Why pods and weights go in separate commits:** in one commit, Argo CD may apply the weights before the canary pods exist, and that 10% of users gets `503`. Tested under continuous traffic: one commit gave 7 errors; two commits (on, and later off) gave 0 out of 267.
 
 ### Cells (Crossplane)
 
@@ -657,6 +664,8 @@ After a successful promotion:
 | Kargo promotion `Errored`: `Invalid username or token` | Bad GitHub token in Vault (for example pasted twice) | Re-run `scripts/set-kargo-git-token.sh` and paste once; the script now rejects malformed tokens |
 | Kargo `git push` rejected (non-fast-forward) | Someone pushed to `main` between clone and push | Promote again |
 | `password authentication failed` for a `v-kubernet-crud-api-...` user after Vault was sealed | The operator stopped renewing while Vault was sealed and the DB user expired | `scripts/bootstrap-vault.sh unseal` now restarts the operator; on older setups run `kubectl rollout restart deploy -n vault-secrets-operator-system vault-secrets-operator-controller-manager` |
+| App `Degraded`, Kargo Stage `Unhealthy`, for about a minute after a rollout | The new pod has no CPU metrics yet, so its HPA can't report | Wait; it clears by itself |
+| A pushed change isn't live yet | Argo CD checks Git every few minutes | Click Refresh, or `kubectl annotate application <app> -n argocd argocd.argoproj.io/refresh=normal --overwrite` |
 | Argo CD sync fails with `field is immutable` on a Deployment `selector` | The chart changed the Deployment's labels (for example adding `track`) | Delete the Deployment once; Argo CD recreates it (a few seconds of downtime) |
 | Disabled canary still running, app `OutOfSync` | Argo CD won't auto-sync an app down to zero resources | `allowEmpty: true` on the canary app (already set) |
 | `Cell` stays `READY False` | Crossplane only sees a `Ready` condition; Argo CD apps and AuthorizationPolicies don't have one | The Composition sets readiness from Argo CD health (already set) |
