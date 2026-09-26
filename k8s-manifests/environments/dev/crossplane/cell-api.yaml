@@ -113,6 +113,12 @@ spec:
             {{- $spec := .observed.composite.resource.spec }}
             {{- $ns := printf "cell-%s" $name }}
             {{- $repo := "https://github.com/mandar33/local-eks-platform.git" }}
+            {{- /* Argo CD apps and AuthorizationPolicies have no Ready condition,
+                   so readiness is set here: an app is ready once Argo CD
+                   reports it Healthy. */}}
+            {{- $observed := .observed.resources | default dict }}
+            {{- $crudHealth := dig "crud-app" "resource" "status" "health" "status" "" $observed }}
+            {{- $frontendHealth := dig "frontend-app" "resource" "status" "health" "status" "" $observed }}
             ---
             apiVersion: v1
             kind: Namespace
@@ -131,6 +137,9 @@ spec:
               namespace: argocd
               annotations:
                 gotemplating.fn.crossplane.io/composition-resource-name: crud-app
+                {{- if eq $crudHealth "Healthy" }}
+                gotemplating.fn.crossplane.io/ready: "True"
+                {{- end }}
             spec:
               project: default
               source:
@@ -159,6 +168,9 @@ spec:
               namespace: argocd
               annotations:
                 gotemplating.fn.crossplane.io/composition-resource-name: frontend-app
+                {{- if eq $frontendHealth "Healthy" }}
+                gotemplating.fn.crossplane.io/ready: "True"
+                {{- end }}
             spec:
               project: default
               source:
@@ -233,6 +245,7 @@ spec:
               namespace: {{ $ns }}
               annotations:
                 gotemplating.fn.crossplane.io/composition-resource-name: crud-authz
+                gotemplating.fn.crossplane.io/ready: "True"
             spec:
               selector:
                 matchLabels:
