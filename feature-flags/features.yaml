@@ -3,20 +3,4 @@ flags:
   - key: enable-new-schema
     name: Enable New Database Schema
     type: BOOLEAN_FLAG_TYPE
-    enabled: false
-    rollouts:
-      - segment:
-          key: beta-testers
-          value: true
-      - threshold:
-          percentage: 50
-          value: true
-segments:
-  - key: beta-testers
-    name: Beta testers
-    match_type: ALL_MATCH_TYPE
-    constraints:
-      - type: STRING_COMPARISON_TYPE
-        property: plan
-        operator: eq
-        value: beta
+    enabled: true
