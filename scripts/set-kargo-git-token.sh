@@ -20,8 +20,15 @@ GITHUB_USER="${GITHUB_USER:-mandar33}"
 load_root_token
 require_unsealed
 
+echo "Paste the token once, then press Enter. Nothing is shown while you paste."
 read -rsp "GitHub fine-grained token for $REPO_URL: " TOKEN; echo
-[[ -n "$TOKEN" ]] || { echo "No token entered." >&2; exit 1; }
+TOKEN="${TOKEN//$'\r'/}"
+# Fine-grained tokens are github_pat_ + 82 characters; classic ones ghp_ + 36.
+if [[ ! "$TOKEN" =~ ^(github_pat_[A-Za-z0-9_]{82}|ghp_[A-Za-z0-9]{36})$ ]]; then
+  echo "That doesn't look like one GitHub token (got ${#TOKEN} characters)." >&2
+  echo "Pasted twice? Run the script again and paste once." >&2
+  exit 1
+fi
 
 printf '{"data":{"repoURL":"%s","username":"%s","password":"%s"}}' "$REPO_URL" "$GITHUB_USER" "$TOKEN" |
   vault_cmd write kv/data/kargo/github - >/dev/null
