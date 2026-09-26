@@ -100,6 +100,85 @@ spec:
         subset: canary
       weight: 0
 ---
+# Cell router for http://cells.localhost:8080. Real systems look the user up
+# in a routing table; here the user ID's last digit decides:
+#   odd  -> cell a      even -> cell b      x-cell: a|b pins a request
+# Responses carry an x-cell header saying which cell answered.
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: cell-router
+spec:
+  gateways:
+  - platform-gateway
+  hosts:
+  - cells.localhost
+  http:
+  - name: pinned-a
+    match:
+    - headers:
+        x-cell:
+          exact: a
+    route:
+    - destination:
+        host: frontend-api-svc.cell-a.svc.cluster.local
+        port:
+          number: 80
+    headers:
+      response:
+        set:
+          x-cell: "a"
+  - name: pinned-b
+    match:
+    - headers:
+        x-cell:
+          exact: b
+    route:
+    - destination:
+        host: frontend-api-svc.cell-b.svc.cluster.local
+        port:
+          number: 80
+    headers:
+      response:
+        set:
+          x-cell: "b"
+  - name: odd-users
+    match:
+    - uri:
+        regex: "/users/[0-9]*[13579]"
+    route:
+    - destination:
+        host: frontend-api-svc.cell-a.svc.cluster.local
+        port:
+          number: 80
+    headers:
+      response:
+        set:
+          x-cell: "a"
+  - name: even-users
+    match:
+    - uri:
+        regex: "/users/[0-9]*[02468]"
+    route:
+    - destination:
+        host: frontend-api-svc.cell-b.svc.cluster.local
+        port:
+          number: 80
+    headers:
+      response:
+        set:
+          x-cell: "b"
+  - name: everything-else
+    route:
+    - destination:
+        host: frontend-api-svc.cell-a.svc.cluster.local
+        port:
+          number: 80
+    headers:
+      response:
+        set:
+          x-cell: "a"
+---
 apiVersion: security.istio.io/v1beta1
 kind: AuthorizationPolicy
 metadata:

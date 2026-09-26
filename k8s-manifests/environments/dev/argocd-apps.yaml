@@ -3,7 +3,8 @@
 # platform-networking-dev syncs networking/ (Istio), postgres-dev syncs data/,
 # vault-secrets-dev syncs secrets/ (Vault Secrets Operator resources),
 # registry-dev syncs registry/ (Zot), kargo-dev syncs kargo/ (promotions),
-# frontend-api-canary-dev runs the frontend canary (frontend-canary-values.yaml).
+# frontend-api-canary-dev runs the frontend canary (frontend-canary-values.yaml),
+# crossplane-dev defines the Cell API and cells-dev creates the cells.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -193,3 +194,55 @@ spec:
     automated:
       prune: true
       selfHeal: true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: crossplane-dev
+  namespace: argocd
+spec:
+  # The Cell API: Crossplane functions, RBAC, XRD and Composition.
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/environments/dev/crossplane
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: crossplane-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 20
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cells-dev
+  namespace: argocd
+spec:
+  # The cells themselves. Needs crossplane-dev first, hence the retry.
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/environments/dev/cells
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: crossplane-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 20
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m

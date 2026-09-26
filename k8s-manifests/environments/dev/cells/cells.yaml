@@ -1,0 +1,18 @@
+# Two cells. The cell router (networking/istio-networking.yaml, host
+# cells.localhost) sends odd user IDs to cell a and even ones to cell b.
+# Add a cell: copy one of these, commit, and add a route for it.
+apiVersion: platform.local/v1alpha1
+kind: Cell
+metadata:
+  name: a
+spec:
+  frontendTag: 1.1.1
+  crudTag: 1.1.1
+---
+apiVersion: platform.local/v1alpha1
+kind: Cell
+metadata:
+  name: b
+spec:
+  frontendTag: 1.1.1
+  crudTag: 1.1.1

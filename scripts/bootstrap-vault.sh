@@ -141,6 +141,15 @@ vault_run write auth/kubernetes/role/crud-api \
   token_policies=crud-api \
   token_ttl=1h >/dev/null
 
+# Same access for crud-api in every cell namespace (cell-a, cell-b, ...),
+# which Crossplane creates from Cell resources.
+vault_run write auth/kubernetes/role/crud-api-cells \
+  bound_service_account_names=crud-api \
+  'bound_service_account_namespaces=cell-*' \
+  audience=vault \
+  token_policies=crud-api \
+  token_ttl=1h >/dev/null
+
 log "Done"
 cat <<EOF
 Vault is issuing Postgres credentials for crud-api.

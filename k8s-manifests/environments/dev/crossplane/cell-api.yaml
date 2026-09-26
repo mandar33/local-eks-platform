@@ -1,0 +1,247 @@
+# A "Cell" is one complete, isolated copy of the app stack that serves a slice
+# of users. If a cell breaks, only its users are affected.
+#
+# Crossplane turns this small request:
+#
+#   apiVersion: platform.local/v1alpha1
+#   kind: Cell
+#   metadata: {name: a}
+#   spec: {frontendTag: 1.1.1, crudTag: 1.1.1}
+#
+# into: a namespace (cell-a) with Istio sidecars, Argo CD apps for
+# frontend-api and crud-api (same Helm chart as default), Vault Secrets
+# Operator resources for crud-api's DB credentials, and an Istio
+# AuthorizationPolicy so only the cell's own frontend can call its crud-api.
+#
+# Cells share the one Postgres to save memory; each cell still gets its own
+# short-lived database users from Vault.
+
+# Functions run the composition pipeline.
+apiVersion: pkg.crossplane.io/v1
+kind: Function
+metadata:
+  name: function-go-templating
+spec:
+  package: xpkg.crossplane.io/crossplane-contrib/function-go-templating:v0.13.0
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Function
+metadata:
+  name: function-auto-ready
+spec:
+  package: xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.7.0
+---
+# Crossplane v2 can compose any Kubernetes kind, but it needs permission for
+# each one. This ClusterRole is aggregated into Crossplane's own role.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: crossplane-compose-cells
+  labels:
+    rbac.crossplane.io/aggregate-to-crossplane: "true"
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["*"]
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications"]
+    verbs: ["*"]
+  - apiGroups: ["secrets.hashicorp.com"]
+    resources: ["vaultconnections", "vaultauths", "vaultdynamicsecrets"]
+    verbs: ["*"]
+  - apiGroups: ["security.istio.io"]
+    resources: ["authorizationpolicies"]
+    verbs: ["*"]
+---
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: cells.platform.local
+spec:
+  group: platform.local
+  names:
+    kind: Cell
+    plural: cells
+  # A cell owns a whole namespace, so the Cell itself is cluster-scoped.
+  scope: Cluster
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      additionalPrinterColumns:
+        - name: FRONTEND
+          type: string
+          jsonPath: .spec.frontendTag
+        - name: CRUD
+          type: string
+          jsonPath: .spec.crudTag
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                frontendTag:
+                  type: string
+                  description: frontend-api image tag in Zot (localhost:5001/frontend-api)
+                crudTag:
+                  type: string
+                  description: crud-api image tag in Zot (localhost:5001/crud-api)
+              required: [frontendTag, crudTag]
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: cell
+spec:
+  compositeTypeRef:
+    apiVersion: platform.local/v1alpha1
+    kind: Cell
+  mode: Pipeline
+  pipeline:
+    - step: render-cell
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $name := .observed.composite.resource.metadata.name }}
+            {{- $spec := .observed.composite.resource.spec }}
+            {{- $ns := printf "cell-%s" $name }}
+            {{- $repo := "https://github.com/mandar33/local-eks-platform.git" }}
+            ---
+            apiVersion: v1
+            kind: Namespace
+            metadata:
+              name: {{ $ns }}
+              labels:
+                istio-injection: enabled
+                platform.local/cell: {{ $name }}
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: namespace
+            ---
+            apiVersion: argoproj.io/v1alpha1
+            kind: Application
+            metadata:
+              name: {{ $ns }}-crud-api
+              namespace: argocd
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: crud-app
+            spec:
+              project: default
+              source:
+                repoURL: {{ $repo }}
+                targetRevision: main
+                path: k8s-manifests/charts/base-api
+                helm:
+                  releaseName: crud-api
+                  valueFiles:
+                    - ../../environments/dev/crud-values.yaml
+                  valuesObject:
+                    image:
+                      tag: {{ $spec.crudTag | quote }}
+              destination:
+                server: https://kubernetes.default.svc
+                namespace: {{ $ns }}
+              syncPolicy:
+                automated:
+                  prune: true
+                  selfHeal: true
+            ---
+            apiVersion: argoproj.io/v1alpha1
+            kind: Application
+            metadata:
+              name: {{ $ns }}-frontend-api
+              namespace: argocd
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: frontend-app
+            spec:
+              project: default
+              source:
+                repoURL: {{ $repo }}
+                targetRevision: main
+                path: k8s-manifests/charts/base-api
+                helm:
+                  releaseName: frontend-api
+                  valueFiles:
+                    - ../../environments/dev/frontend-values.yaml
+                  valuesObject:
+                    image:
+                      tag: {{ $spec.frontendTag | quote }}
+                    env:
+                      CRUD_API_URL: http://crud-api-svc.{{ $ns }}.svc.cluster.local
+              destination:
+                server: https://kubernetes.default.svc
+                namespace: {{ $ns }}
+              syncPolicy:
+                automated:
+                  prune: true
+                  selfHeal: true
+            ---
+            apiVersion: secrets.hashicorp.com/v1beta1
+            kind: VaultConnection
+            metadata:
+              name: vault
+              namespace: {{ $ns }}
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: vault-connection
+            spec:
+              address: http://vault.vault.svc.cluster.local:8200
+            ---
+            apiVersion: secrets.hashicorp.com/v1beta1
+            kind: VaultAuth
+            metadata:
+              name: crud-api
+              namespace: {{ $ns }}
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: vault-auth
+            spec:
+              vaultConnectionRef: vault
+              method: kubernetes
+              mount: kubernetes
+              kubernetes:
+                role: crud-api-cells
+                serviceAccount: crud-api
+                audiences: ["vault"]
+            ---
+            apiVersion: secrets.hashicorp.com/v1beta1
+            kind: VaultDynamicSecret
+            metadata:
+              name: crud-db
+              namespace: {{ $ns }}
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: crud-db
+            spec:
+              vaultAuthRef: crud-api
+              mount: database
+              path: creds/crud-api
+              destination:
+                name: crud-db
+                create: true
+              rolloutRestartTargets:
+                - kind: Deployment
+                  name: crud-api
+            ---
+            apiVersion: security.istio.io/v1
+            kind: AuthorizationPolicy
+            metadata:
+              name: allow-frontend-to-crud
+              namespace: {{ $ns }}
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: crud-authz
+            spec:
+              selector:
+                matchLabels:
+                  app: crud-api
+              action: ALLOW
+              rules:
+                - from:
+                    - source:
+                        principals: ["cluster.local/ns/{{ $ns }}/sa/frontend-api"]
+    - step: mark-ready
+      functionRef:
+        name: function-auto-ready
