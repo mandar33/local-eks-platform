@@ -9,5 +9,5 @@ env:
   FLIPT_URL: http://flipt.default.svc.cluster.local:8080
 
 autoscaling:
-  minReplicas: 1
+  minReplicas: 2
   maxReplicas: 3
