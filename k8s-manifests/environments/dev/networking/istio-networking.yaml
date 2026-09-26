@@ -60,13 +60,13 @@ spec:
         subset: stable
         port:
           number: 80
-      weight: 90
+      weight: 00
     - destination:
         host: frontend-api-svc.default.svc.cluster.local
         subset: canary
         port:
           number: 80
-      weight: 10
+      weight: 0
 ---
 # Same split for calls from inside the mesh. Keep the weights in step with
 # frontend-routing above.
@@ -94,11 +94,11 @@ spec:
     - destination:
         host: frontend-api-svc.default.svc.cluster.local
         subset: stable
-      weight: 90
+      weight: 00
     - destination:
         host: frontend-api-svc.default.svc.cluster.local
         subset: canary
-      weight: 10
+      weight: 0
 ---
 apiVersion: security.istio.io/v1beta1
 kind: AuthorizationPolicy

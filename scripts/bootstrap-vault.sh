@@ -32,6 +32,13 @@ unseal() {
     key="$(sed -n '/"unseal_keys_b64"/{n;s/.*"\([^"]*\)".*/\1/p;}' "$INIT_FILE")"
     printf '%s\n' "$key" | k exec -i -n vault vault-0 -- sh -c 'read -r K; vault operator unseal "$K" >/dev/null'
     echo "Vault unsealed."
+    # While Vault was sealed the operator's Vault login went stale, and it can
+    # stop renewing leases without recovering. A restart makes it log in again
+    # and re-issue any credentials that expired in the meantime.
+    if k get deploy vault-secrets-operator-controller-manager -n vault-secrets-operator-system >/dev/null 2>&1; then
+      k rollout restart deploy/vault-secrets-operator-controller-manager -n vault-secrets-operator-system >/dev/null
+      echo "Restarted the Vault Secrets Operator so it re-authenticates."
+    fi
   else
     echo "Vault is already unsealed."
   fi
