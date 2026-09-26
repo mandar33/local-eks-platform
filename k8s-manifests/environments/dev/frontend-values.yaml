@@ -7,7 +7,6 @@ image:
 env:
   CRUD_API_URL: http://crud-api-svc.default.svc.cluster.local
   FLIPT_URL: http://flipt.default.svc.cluster.local:8080
-  LOG_LEVEL: debug
 
 autoscaling:
   minReplicas: 1
