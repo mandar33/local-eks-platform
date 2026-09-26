@@ -2,7 +2,7 @@ nameOverride: frontend-api
 
 image:
   repository: localhost:5001/frontend-api
-  tag: 1.2.1
+  tag: 1.2.2
 
 env:
   CRUD_API_URL: http://crud-api-svc.default.svc.cluster.local
