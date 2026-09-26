@@ -1,4 +1,4 @@
 # Layered on top of ../dev/frontend-values.yaml. Region B gets its own image
 # tag so releases can reach it after dev: Kargo's region-b Stage updates this.
 image:
-  tag: 1.1.2
+  tag: 1.2.5
