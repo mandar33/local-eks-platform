@@ -4,7 +4,8 @@
 # vault-secrets-dev syncs secrets/ (Vault Secrets Operator resources),
 # registry-dev syncs registry/ (Zot), kargo-dev syncs kargo/ (promotions),
 # frontend-api-canary-dev runs the frontend canary (frontend-canary-values.yaml),
-# crossplane-dev defines the Cell API and cells-dev creates the cells.
+# crossplane-dev defines the Cell API and cells-dev creates the cells,
+# flipt-dev runs Flipt from its official chart with flipt-values.yaml.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -261,6 +262,35 @@ spec:
     repoURL: https://github.com/mandar33/local-eks-platform.git
     targetRevision: main
     path: k8s-manifests/environments/dev/regions
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: flipt-dev
+  namespace: argocd
+spec:
+  # Flipt (feature flags). Was a manual helm install; now managed from Git.
+  project: default
+  sources:
+    # Flipt's official chart, pinned...
+    - repoURL: https://helm.flipt.io
+      chart: flipt
+      targetRevision: 0.87.9
+      helm:
+        releaseName: flipt
+        valueFiles:
+          - $values/k8s-manifests/environments/dev/flipt-values.yaml
+    # ...with its values from this repo ("$values" above points here).
+    - repoURL: https://github.com/mandar33/local-eks-platform.git
+      targetRevision: main
+      ref: values
   destination:
     server: https://kubernetes.default.svc
     namespace: default

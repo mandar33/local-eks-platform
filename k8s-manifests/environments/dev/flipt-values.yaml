@@ -1,0 +1,11 @@
+# Values for Flipt's official Helm chart (https://helm.flipt.io, chart flipt),
+# used by the flipt-dev and region-b-flipt Argo CD apps. Flipt reads the flags
+# themselves from feature-flags/ in this repo, re-checking every 30 seconds.
+flipt:
+  config:
+    storage:
+      type: git
+      git:
+        repository: https://github.com/mandar33/local-eks-platform.git
+        ref: main
+        directory: feature-flags

@@ -1,0 +1,11 @@
+warning: in the working copy of 'feature-flags/features.yaml', LF will be replaced by CRLF the next time Git touches it
+[1mdiff --git a/feature-flags/features.yaml b/feature-flags/features.yaml[m
+[1mindex f4ace21..a45b573 100644[m
+[1m--- a/feature-flags/features.yaml[m
+[1m+++ b/feature-flags/features.yaml[m
+[36m@@ -3,4 +3,4 @@[m [mflags:[m
+   - key: enable-new-schema[m
+     name: Enable New Database Schema[m
+     type: BOOLEAN_FLAG_TYPE[m
+[31m-    enabled: true[m
+[32m+[m[32m    enabled: false[m
