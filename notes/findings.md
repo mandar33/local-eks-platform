@@ -28,6 +28,8 @@ Everything below actually happened while building and testing this platform (25�
 | A `git revert` rollback wasn't reflected in Kargo | Kargo tracks what it promoted, not hand-made Git changes | Roll back by promoting older Freight in Kargo | Lab 6 |
 | Argo CD took about 80–130 s to apply a push | Its regular check of Git runs every few minutes | `kubectl annotate application <app> -n argocd argocd.argoproj.io/refresh=normal --overwrite`: about 3 s | Lab 6 |
 | A change to `frontend-values.yaml` also changed the cells and region B | They all reuse that values file | Expected; per-environment overrides go in their own files | Lab 6 |
+| Flipt wasn't in Git at all, and Helm listed it as `failed` for two days | Installed by a one-off `helm install`; the first install timed out (bad flag file), Flipt recovered, Helm's record didn't | Argo CD apps `flipt-dev` / `region-b-flipt` adopted the running Flipt (no restart); stale Helm records deleted | `argocd-apps.yaml`, `flipt-values.yaml` |
+| `git add -A` committed two junk files | The working folder had leftovers from a mistyped command (pager output) | Removed; stage files by name and check `git status` first | — |
 | Crossplane `Cell` stayed `READY False` | Argo CD Applications and AuthorizationPolicies have no `Ready` condition | The Composition sets readiness from Argo CD health | `crossplane/cell-api.yaml` |
 
 ## Secrets, registry, apps

@@ -27,6 +27,9 @@ A list to pick from, roughly in order of value. Nothing here is broken today; th
 
 ## Delivery
 
+- **Promote flag changes region by region.** Both regions' Flipt read the same `feature-flags/` on `main`, so a flag change reaches everywhere at once (only a few seconds apart). Giving each region its own flag directory, and letting Kargo promote flag changes (a Warehouse with a Git subscription on `feature-flags/`), would release flags the same way images are released: dev first, then region B.
+- **Other hand-installed pieces under GitOps.** Flipt now is. Istio, cert-manager, Vault, the Vault Secrets Operator, Kargo, Crossplane and metrics-server are still one-off installs (Argo CD itself has to be). An "app of apps" or ApplicationSet for platform add-ons would put their versions and settings in Git too.
+
 - **Kargo for crud-api too:** today only frontend-api is promoted by Kargo; crud-api's tag is edited by hand.
 - **Auto-promotion to dev:** let Kargo promote to dev automatically after CI, and keep the manual approval for region B.
 - **Health check for `Cell` in Argo CD** (Lua in `argocd-cm`), so a stuck cell shows as Degraded instead of Healthy.

@@ -142,7 +142,7 @@ flowchart TB
 | [kind](https://kind.sigs.k8s.io/) | v0.33.0 (Kubernetes v1.34.11) | – | Runs the cluster as Docker containers: 1 control-plane, 2 workers. |
 | [Istio](https://istio.io/) | 1.31.1 | `istio-system` | Ingress gateway, sidecar proxies, mesh-wide STRICT mTLS and authorization policies. |
 | [Argo CD](https://argo-cd.readthedocs.io/) | v3.5.3 | `argocd` | Keeps the cluster in sync with this repo, with automatic sync, prune and self-heal. |
-| [Flipt](https://www.flipt.io/) | v1.61.1 | `default` | Evaluates feature flags. Reads `feature-flags/` from GitHub (read-only, git storage). |
+| [Flipt](https://www.flipt.io/) | v1.61.1 (chart 0.87.9) | `default` | Evaluates feature flags. Reads `feature-flags/` from GitHub (read-only, git storage). Deployed by Argo CD (`flipt-dev`, `region-b-flipt`) from its official chart with `flipt-values.yaml`. |
 | Postgres | 17 | `data` | Holds the `users_v1` and `users_v2` tables, seeded on first start. |
 | [Vault](https://developer.hashicorp.com/vault) | 2.0.4 (chart 0.34.1) | `vault` | Issues short-lived Postgres users; stores the registry login and Kargo's GitHub token. |
 | [Vault Secrets Operator](https://developer.hashicorp.com/vault/docs/platform/k8s/vso) | 1.6.0 | `vault-secrets-operator-system` | Copies secrets from Vault into Kubernetes Secrets, and restarts apps when they change. |
@@ -181,6 +181,7 @@ local-eks-platform/
 │   └── environments/dev/
 │       ├── frontend-values.yaml # frontend values (image, env); Kargo updates image.tag
 │       ├── frontend-canary-values.yaml # canary on/off + tag, layered on frontend-values
+│       ├── flipt-values.yaml    # Flipt's settings (official chart): read flags from Git
 │       ├── crud-values.yaml     # crud values (image, env, which Secret keys to read)
 │       ├── argocd-apps.yaml     # Argo CD Applications for region A
 │       ├── networking/          # Istio Gateway, VirtualService, AuthorizationPolicy
@@ -222,11 +223,12 @@ Argo CD Applications in `argocd-apps.yaml`:
 | `vault-secrets-dev` | `environments/dev/secrets/` | Resources that produce the `crud-db` Secret |
 | `registry-dev` | `environments/dev/registry/` | Zot and its certificates and login |
 | `kargo-dev` | `environments/dev/kargo/` | Kargo Project, Warehouse, Stages and Git credentials |
+| `flipt-dev` | Flipt's official chart (helm.flipt.io, 0.87.9) + `flipt-values.yaml` from this repo | Flipt (a "multi-source" app: chart from one place, values from another) |
 | `frontend-api-canary-dev` | `charts/base-api` + `frontend-values.yaml` + `frontend-canary-values.yaml` | The frontend canary Deployment (nothing when `canary.enabled: false`) |
 | `crossplane-dev` | `environments/dev/crossplane/` | The `Cell` API |
 | `cells-dev` | `environments/dev/cells/` | `Cell` a and b; Crossplane then creates `cell-<name>-frontend-api` and `cell-<name>-crud-api` apps |
 | `cross-region-dev` | `environments/dev/regions/` | NodePorts 30820 (Vault) and 30432 (Postgres) for region B |
-| `region-b-*` (4 apps) | `environments/region-b/` + the chart | Region B's frontend, crud-api, networking and DB credentials, deployed to the `region-b` cluster |
+| `region-b-*` (5 apps) | `environments/region-b/` + the chart | Region B's frontend, crud-api, Flipt, networking and DB credentials, deployed to the `region-b` cluster |
 
 ## Setup from scratch
 
@@ -255,13 +257,8 @@ helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/
 helm upgrade --install metrics-server metrics-server/metrics-server -n kube-system \
   --set 'args={--kubelet-insecure-tls}'
 
-# 5. Flipt, reading flags from this repo
-helm repo add flipt https://helm.flipt.io
-helm upgrade --install flipt flipt/flipt -n default \
-  --set flipt.config.storage.type=git \
-  --set flipt.config.storage.git.repository=https://github.com/mandar33/local-eks-platform.git \
-  --set flipt.config.storage.git.ref=main \
-  --set flipt.config.storage.git.directory=feature-flags
+# 5. Flipt: nothing to do here. The flipt-dev Argo CD app (step 7) installs it
+#    from its official chart with k8s-manifests/environments/dev/flipt-values.yaml.
 
 # 6. Argo Rollouts and Kargo. Type the Kargo admin password at the hidden prompt.
 kubectl create namespace argo-rollouts
@@ -316,10 +313,7 @@ kubectl config use-context kind-region-b
 istioctl install -f istio-config.yaml -y
 kubectl label namespace default istio-injection=enabled
 kubectl apply -f istio-mtls.yaml
-helm upgrade --install flipt flipt/flipt -n default \
-  --set flipt.config.storage.type=git \
-  --set flipt.config.storage.git.repository=https://github.com/mandar33/local-eks-platform.git \
-  --set flipt.config.storage.git.ref=main --set flipt.config.storage.git.directory=feature-flags
+# (Flipt comes from the region-b-flipt Argo CD app, applied below.)
 helm upgrade --install metrics-server metrics-server/metrics-server -n kube-system --set 'args={--kubelet-insecure-tls}'
 helm upgrade --install vault-secrets-operator hashicorp/vault-secrets-operator --version 1.6.0 \
   -n vault-secrets-operator-system --create-namespace --wait
