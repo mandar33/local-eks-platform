@@ -2,7 +2,7 @@
 #
 #   push to main touching apps/  ->  build  ->  push to Zot  ->  scan
 #                                ->  wait for your approval ("dev" environment)
-#                                ->  Kargo promotes frontend-api to dev
+#                                ->  Kargo promotes both apps (one Freight) to dev
 #
 # Security: this runs on your laptop, so it never runs on pull requests (anyone
 # can open one on a public repo). Only pushes to main, or a manual run, start it.
@@ -79,7 +79,7 @@ jobs:
         run: docker logout localhost:5001
 
   promote-dev:
-    name: Promote frontend-api to dev
+    name: Promote both apps to dev
     needs: build
     runs-on: [self-hosted, local-eks-platform]
     # Pauses here until a reviewer approves (Settings > Environments > dev).
@@ -87,14 +87,14 @@ jobs:
     steps:
       - name: Wait for Kargo to see the new image
         run: |
-          kubectl annotate warehouse frontend-images kargo.akuity.io/refresh="$(date +%s)" --overwrite
+          kubectl annotate warehouse app-images kargo.akuity.io/refresh="$(date +%s)" --overwrite
           for _ in $(seq 1 36); do
             freight=$(kubectl get freight -o json \
-              | jq -r --arg v "$VERSION" '.items[] | select(.images[0].tag == $v) | .metadata.name')
+              | jq -r --arg v "$VERSION" '.items[] | select((.images | length) == 2 and all(.images[]; .tag == $v)) | .metadata.name')
             [ -n "$freight" ] && break
             sleep 5
           done
-          [ -n "$freight" ] || { echo "::error::Kargo never saw frontend-api:$VERSION"; exit 1; }
+          [ -n "$freight" ] || { echo "::error::Kargo never saw frontend-api and crud-api $VERSION together"; exit 1; }
           echo "FREIGHT=$freight" >> "$GITHUB_ENV"
 
       - name: Promote to dev
@@ -113,7 +113,7 @@ jobs:
           for _ in $(seq 1 60); do
             phase=$(kubectl get "$promotion" -o jsonpath='{.status.phase}')
             case "$phase" in
-              Succeeded) echo "frontend-api $VERSION is promoted to dev"; exit 0 ;;
+              Succeeded) echo "frontend-api and crud-api $VERSION are promoted to dev"; exit 0 ;;
               Failed|Errored|Aborted)
                 echo "::error::Promotion $phase: $(kubectl get "$promotion" -o jsonpath='{.status.message}')"; exit 1 ;;
             esac

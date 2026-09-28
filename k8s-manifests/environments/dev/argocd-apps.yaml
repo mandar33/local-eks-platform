@@ -4,7 +4,7 @@
 # vault-secrets-dev syncs secrets/ (Vault Secrets Operator resources),
 # registry-dev syncs registry/ (Zot), kargo-dev syncs kargo/ (promotions),
 # frontend-api-canary-dev runs the frontend canary (frontend-canary-values.yaml),
-# crossplane-dev defines the Cell API and cells-dev creates the cells,
+# crossplane-dev defines the Cell API; cell-a and cell-b create one cell each,
 # flipt-dev runs Flipt from its official chart with flipt-values.yaml.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -37,6 +37,9 @@ kind: Application
 metadata:
   name: crud-api-dev
   namespace: argocd
+  annotations:
+    # Lets Kargo's "dev" Stage trigger syncs of this app (see kargo/).
+    kargo.akuity.io/authorized-stage: local-eks-platform:dev
 spec:
   project: default
   source:
@@ -227,15 +230,51 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: cells-dev
+  name: cell-a
   namespace: argocd
+  annotations:
+    # Lets Kargo's "cell-a" Stage trigger syncs of this app.
+    kargo.akuity.io/authorized-stage: local-eks-platform:cell-a
 spec:
-  # The cells themselves. Needs crossplane-dev first, hence the retry.
+  # Cell a (cells/cell-a.yaml). Needs crossplane-dev first, hence the retry.
   project: default
   source:
     repoURL: https://github.com/mandar33/local-eks-platform.git
     targetRevision: main
     path: k8s-manifests/environments/dev/cells
+    directory:
+      include: cell-a.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: crossplane-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 20
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cell-b
+  namespace: argocd
+  annotations:
+    # Lets Kargo's "cell-b" Stage trigger syncs of this app.
+    kargo.akuity.io/authorized-stage: local-eks-platform:cell-b
+spec:
+  # Cell b (cells/cell-b.yaml). Needs crossplane-dev first, hence the retry.
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/environments/dev/cells
+    directory:
+      include: cell-b.yaml
   destination:
     server: https://kubernetes.default.svc
     namespace: crossplane-system

@@ -1,10 +1,15 @@
-# Kargo: promote new frontend-api images into the dev environment.
+# Kargo: moves each release through the stages, one at a time.
 #
-#   docker push localhost:5001/frontend-api:1.0.1
-#     -> Warehouse sees the new SemVer tag in Zot and creates Freight
-#     -> promote the Freight to Stage "dev" (UI, CLI or a Promotion resource)
-#     -> Stage writes image.tag into frontend-values.yaml, commits, pushes
-#     -> Kargo asks Argo CD to sync frontend-api-dev
+#   CI pushes frontend-api:1.2.N and crud-api:1.2.N to Zot
+#     -> the Warehouse "app-images" sees both and records them as one Freight
+#        (a matched pair: they always travel together)
+#     -> dev -> region-b -> cell-a -> cell-b
+#        each Stage accepts only Freight the stage before it already has
+#     -> a Stage writes both image tags into its own files in Git, commits as
+#        "Kargo", pushes, and asks Argo CD to sync
+#
+# Promote with scripts/promote.sh <stage> <version>, the Kargo UI, or a
+# Promotion resource. CI promotes to dev after your approval on GitHub.
 #
 # Kargo commits with a GitHub token that lives only in Vault
 # (scripts/set-kargo-git-token.sh). The Vault Secrets Operator copies it into
@@ -16,23 +21,30 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "-1"
 ---
+# Watches Zot for both apps. Freight = the newest 1.x.y of each, as a pair.
 apiVersion: kargo.akuity.io/v1alpha1
 kind: Warehouse
 metadata:
-  name: frontend-images
+  name: app-images
   namespace: local-eks-platform
 spec:
   subscriptions:
+    # Kargo runs in the cluster, so it uses Zot's in-cluster name. The nodes
+    # pull the same images as localhost:5001/<app>. Zot's certificate comes
+    # from the cluster's own CA, which Kargo doesn't trust; traffic is still
+    # encrypted.
     - image:
-        # Kargo runs in the cluster, so it uses Zot's in-cluster name. The
-        # nodes pull the same images as localhost:5001/frontend-api.
         repoURL: zot.registry.svc.cluster.local:5000/frontend-api
         imageSelectionStrategy: SemVer
         constraint: ^1.0.0
-        # Zot's certificate comes from the cluster's own CA, which Kargo
-        # doesn't trust. Traffic is still encrypted.
+        insecureSkipTLSVerify: true
+    - image:
+        repoURL: zot.registry.svc.cluster.local:5000/crud-api
+        imageSelectionStrategy: SemVer
+        constraint: ^1.0.0
         insecureSkipTLSVerify: true
 ---
+# Region A main copy. CI promotes here after your approval.
 apiVersion: kargo.akuity.io/v1alpha1
 kind: Stage
 metadata:
@@ -42,7 +54,7 @@ spec:
   requestedFreight:
     - origin:
         kind: Warehouse
-        name: frontend-images
+        name: app-images
       sources:
         direct: true
   promotionTemplate:
@@ -50,8 +62,10 @@ spec:
       vars:
         - name: gitRepo
           value: https://github.com/mandar33/local-eks-platform.git
-        - name: image
+        - name: frontend
           value: zot.registry.svc.cluster.local:5000/frontend-api
+        - name: crud
+          value: zot.registry.svc.cluster.local:5000/crud-api
       steps:
         - uses: git-clone
           config:
@@ -64,11 +78,17 @@ spec:
             path: ./repo/k8s-manifests/environments/dev/frontend-values.yaml
             updates:
               - key: image.tag
-                value: ${{ imageFrom(vars.image).Tag }}
+                value: ${{ imageFrom(vars.frontend).Tag }}
+        - uses: yaml-update
+          config:
+            path: ./repo/k8s-manifests/environments/dev/crud-values.yaml
+            updates:
+              - key: image.tag
+                value: ${{ imageFrom(vars.crud).Tag }}
         - uses: git-commit
           config:
             path: ./repo
-            message: "dev: frontend-api ${{ imageFrom(vars.image).Tag }} (promoted by Kargo)"
+            message: "dev: frontend-api ${{ imageFrom(vars.frontend).Tag }}, crud-api ${{ imageFrom(vars.crud).Tag }} (promoted by Kargo)"
         - uses: git-push
           config:
             path: ./repo
@@ -77,9 +97,10 @@ spec:
             apps:
               - name: frontend-api-dev
                 namespace: argocd
+              - name: crud-api-dev
+                namespace: argocd
 ---
-# Region B only accepts Freight that has already been promoted to dev, so a
-# release reaches regions one at a time: dev (region A) first, then region B.
+# Region B: only versions dev already has.
 apiVersion: kargo.akuity.io/v1alpha1
 kind: Stage
 metadata:
@@ -89,7 +110,7 @@ spec:
   requestedFreight:
     - origin:
         kind: Warehouse
-        name: frontend-images
+        name: app-images
       sources:
         stages:
           - dev
@@ -98,8 +119,10 @@ spec:
       vars:
         - name: gitRepo
           value: https://github.com/mandar33/local-eks-platform.git
-        - name: image
+        - name: frontend
           value: zot.registry.svc.cluster.local:5000/frontend-api
+        - name: crud
+          value: zot.registry.svc.cluster.local:5000/crud-api
       steps:
         - uses: git-clone
           config:
@@ -112,11 +135,17 @@ spec:
             path: ./repo/k8s-manifests/environments/region-b/frontend-values.yaml
             updates:
               - key: image.tag
-                value: ${{ imageFrom(vars.image).Tag }}
+                value: ${{ imageFrom(vars.frontend).Tag }}
+        - uses: yaml-update
+          config:
+            path: ./repo/k8s-manifests/environments/region-b/crud-values.yaml
+            updates:
+              - key: image.tag
+                value: ${{ imageFrom(vars.crud).Tag }}
         - uses: git-commit
           config:
             path: ./repo
-            message: "region-b: frontend-api ${{ imageFrom(vars.image).Tag }} (promoted by Kargo)"
+            message: "region-b: frontend-api ${{ imageFrom(vars.frontend).Tag }}, crud-api ${{ imageFrom(vars.crud).Tag }} (promoted by Kargo)"
         - uses: git-push
           config:
             path: ./repo
@@ -124,6 +153,110 @@ spec:
           config:
             apps:
               - name: region-b-frontend-api
+                namespace: argocd
+              - name: region-b-crud-api
+                namespace: argocd
+---
+# Cell A: only versions region B already has.
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: cell-a
+  namespace: local-eks-platform
+spec:
+  requestedFreight:
+    - origin:
+        kind: Warehouse
+        name: app-images
+      sources:
+        stages:
+          - region-b
+  promotionTemplate:
+    spec:
+      vars:
+        - name: gitRepo
+          value: https://github.com/mandar33/local-eks-platform.git
+        - name: frontend
+          value: zot.registry.svc.cluster.local:5000/frontend-api
+        - name: crud
+          value: zot.registry.svc.cluster.local:5000/crud-api
+      steps:
+        - uses: git-clone
+          config:
+            repoURL: ${{ vars.gitRepo }}
+            checkout:
+              - branch: main
+                path: ./repo
+        - uses: yaml-update
+          config:
+            path: ./repo/k8s-manifests/environments/dev/cells/cell-a.yaml
+            updates:
+              - key: spec.frontendTag
+                value: ${{ imageFrom(vars.frontend).Tag }}
+              - key: spec.crudTag
+                value: ${{ imageFrom(vars.crud).Tag }}
+        - uses: git-commit
+          config:
+            path: ./repo
+            message: "cell-a: frontend-api ${{ imageFrom(vars.frontend).Tag }}, crud-api ${{ imageFrom(vars.crud).Tag }} (promoted by Kargo)"
+        - uses: git-push
+          config:
+            path: ./repo
+        - uses: argocd-update
+          config:
+            apps:
+              - name: cell-a
+                namespace: argocd
+---
+# Cell B: only versions cell A already has.
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: cell-b
+  namespace: local-eks-platform
+spec:
+  requestedFreight:
+    - origin:
+        kind: Warehouse
+        name: app-images
+      sources:
+        stages:
+          - cell-a
+  promotionTemplate:
+    spec:
+      vars:
+        - name: gitRepo
+          value: https://github.com/mandar33/local-eks-platform.git
+        - name: frontend
+          value: zot.registry.svc.cluster.local:5000/frontend-api
+        - name: crud
+          value: zot.registry.svc.cluster.local:5000/crud-api
+      steps:
+        - uses: git-clone
+          config:
+            repoURL: ${{ vars.gitRepo }}
+            checkout:
+              - branch: main
+                path: ./repo
+        - uses: yaml-update
+          config:
+            path: ./repo/k8s-manifests/environments/dev/cells/cell-b.yaml
+            updates:
+              - key: spec.frontendTag
+                value: ${{ imageFrom(vars.frontend).Tag }}
+              - key: spec.crudTag
+                value: ${{ imageFrom(vars.crud).Tag }}
+        - uses: git-commit
+          config:
+            path: ./repo
+            message: "cell-b: frontend-api ${{ imageFrom(vars.frontend).Tag }}, crud-api ${{ imageFrom(vars.crud).Tag }} (promoted by Kargo)"
+        - uses: git-push
+          config:
+            path: ./repo
+        - uses: argocd-update
+          config:
+            apps:
+              - name: cell-b
                 namespace: argocd
 ---
 # GitHub credentials: Vault -> Vault Secrets Operator -> labelled Secret.

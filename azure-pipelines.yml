@@ -82,7 +82,7 @@ stages:
       # A deployment job targets an environment; the approval is configured on
       # the environment in the Azure DevOps UI (Pipelines > Environments > dev).
       - deployment: Promote
-        displayName: Promote frontend-api to dev
+        displayName: Promote both apps to dev
         pool: local-eks-platform
         environment: dev
         strategy:
@@ -90,10 +90,10 @@ stages:
             deploy:
               steps:
                 - script: |
-                    kubectl annotate warehouse frontend-images kargo.akuity.io/refresh="$(date +%s)" --overwrite
+                    kubectl annotate warehouse app-images kargo.akuity.io/refresh="$(date +%s)" --overwrite
                     for _ in $(seq 1 36); do
                       freight=$(kubectl get freight -o json \
-                        | jq -r --arg v "$(VERSION)" '.items[] | select(.images[0].tag == $v) | .metadata.name')
+                        | jq -r --arg v "$(VERSION)" '.items[] | select((.images | length) == 2 and all(.images[]; .tag == $v)) | .metadata.name')
                       [ -n "$freight" ] && break
                       sleep 5
                     done

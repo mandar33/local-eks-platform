@@ -33,6 +33,9 @@ kind: Application
 metadata:
   name: region-b-crud-api
   namespace: argocd
+  annotations:
+    # Lets Kargo's region-b Stage trigger syncs of this app.
+    kargo.akuity.io/authorized-stage: local-eks-platform:region-b
 spec:
   project: default
   source:
