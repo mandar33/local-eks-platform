@@ -3,7 +3,6 @@
 # platform-networking-dev syncs networking/ (Istio), postgres-dev syncs data/,
 # registry-dev syncs registry/ (Zot), kargo-dev syncs kargo/ (promotions),
 # frontend-api-canary-dev runs the frontend canary (frontend-canary-values.yaml),
-# crossplane-dev defines the Cell API (being retired; prod cells are argocd/cells.yaml),
 # flipt-dev runs Flipt from its official chart with flipt-values.yaml.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -244,35 +243,6 @@ spec:
       selfHeal: true
       # With canary.enabled: false the release is empty; let Argo CD remove it.
       allowEmpty: true
----
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: crossplane-dev
-  namespace: argocd
-  # Being retired (phase 7): deleting this app also deletes what it deployed.
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
-spec:
-  # The Cell API: Crossplane functions, RBAC, XRD and Composition.
-  project: default
-  source:
-    repoURL: https://github.com/mandar33/local-eks-platform.git
-    targetRevision: main
-    path: k8s-manifests/platform/region-a/crossplane
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: crossplane-system
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    retry:
-      limit: 20
-      backoff:
-        duration: 15s
-        factor: 2
-        maxDuration: 5m
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
