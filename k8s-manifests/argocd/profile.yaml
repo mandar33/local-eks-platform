@@ -12,7 +12,7 @@ spec:
   source:
     repoURL: https://github.com/mandar33/local-eks-platform.git
     targetRevision: main
-    path: k8s-manifests/profiles/small
+    path: k8s-manifests/profiles/bigtech
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
