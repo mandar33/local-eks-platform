@@ -14,10 +14,13 @@ spec:
     - "*"
 ---
 # Two groups of frontend pods, told apart by the chart's `track` label.
+# Must live in the service's namespace (or the caller's): Istio ignores a
+# DestinationRule elsewhere, and routes to its subsets then fail with 503.
 apiVersion: networking.istio.io/v1
 kind: DestinationRule
 metadata:
   name: frontend-api
+  namespace: dev
 spec:
   host: frontend-api-svc.dev.svc.cluster.local
   subsets:
