@@ -28,7 +28,7 @@ The trade-off: nodes are locked down. There's no SSH, no logging in, and no chan
 | HPA | metrics-server installed by hand | Still needs metrics-server (verify whether your EKS version ships it as an add-on) | Small |
 | Node autoscaling | None (fixed 3 nodes) | Built in: when the HPA adds pods that don't fit, Auto Mode adds nodes | Free |
 | cert-manager | Issues Zot's certificate | Still useful (gateway TLS); AWS Certificate Manager for the load balancer is an alternative | None |
-| Crossplane cells | Namespace + apps per cell | Same, and a Cell could also create AWS resources per cell (its own RDS database, queues) with Crossplane's AWS provider or ACK. Real cell designs often go further: one AWS account or cluster per cell | Optional |
+| Cells | Argo CD ApplicationSet: apps per cell, across both clusters (see `environments-design.md`) | ApplicationSet still deploys the apps. **Crossplane comes back** for each cell's own AWS resources (RDS database, SQS queue, IAM role) with its AWS provider. Real cell designs often go further: one AWS account or cluster per cell | Medium |
 | Two regions | Two kind clusters, NodePorts across the Docker network, nginx as global LB | Two EKS Auto Mode clusters in two AWS regions; ECR cross-region replication; **Route 53** failover or latency routing (or AWS Global Accelerator) instead of nginx | New |
 | Local fixes | Norton, cgroup v1, Git Bash paths, `zot-proxy` | Gone | — |
 

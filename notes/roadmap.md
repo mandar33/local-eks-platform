@@ -21,7 +21,22 @@ Status: ✅ done · 🔜 next · ⏳ waiting on a decision · ⬜ later
 | 9 | Add and remove a route; see who may call whom | ⬜ | |
 | 10 | Add a new cell, then survive losing a region | ⬜ | |
 | – | Round 3: try the new Kargo flow (`1.2.9` through all four stages) | ⬜ | After the docs update |
-| – | Final: restructure into dev → staging → prod | ⬜ | Agreed layout in future-improvements |
+| – | Final: restructure into dev → staging → prod | 🔜 | Design ready: [environments-design.md](environments-design.md), 10 phases |
+
+## Snyk track (prep for work training)
+
+Four Snyk products, each tried on this repo. Run the scan, read the results, fix one thing, then add the scan to CI.
+
+| # | Step | Status | Notes |
+|---|---|---|---|
+| S1 | Account + import the GitHub repo in the Snyk web UI | ⬜ | Nothing installed locally; Snyk scans from GitHub. CLI only if needed later |
+| S2 | Open Source (SCA): `snyk test` on `apps/*/requirements.txt` | ⬜ | Vulnerable Python packages; upgrade paths |
+| S3 | Container: `snyk container test` on both app images | ⬜ | Compare with the 71 → 0 CVE hardening; base image advice |
+| S4 | IaC: `snyk iac test` on Helm charts / manifests | ⬜ | Missing limits, privileged pods, etc. Links to Group 2 resilience |
+| S5 | Code (SAST): `snyk code test` on `apps/` | ⬜ | Must be enabled in the Snyk org settings first |
+| S6 | Ignore vs fix: `.snyk` policy file, severity thresholds | ⬜ | `--severity-threshold=high`; why ignores need a reason and expiry |
+| S7 | Snyk in CI: GitHub Actions step that fails the build on high | ⬜ | `SNYK_TOKEN` from Vault; links to Group 2 "Tests and lint in CI" |
+| S8 | `snyk monitor` + the web UI: projects, reports, fix PRs | ⬜ | What the work training will likely show |
 
 ## Platform work
 
@@ -47,7 +62,7 @@ Status: ✅ done · 🔜 next · ⏳ waiting on a decision · ⬜ later
 
 | Item | Status |
 |---|---|
-| dev → staging → prod restructure, `<what>-<env>-<region>` naming | ⬜ (planned as the final exercise) |
+| dev → staging → prod restructure, profiles `bigtech` (cells, waves) / `small` ([design](environments-design.md)) | 🔜 design done 28 Sep, phase 1 next |
 | Automatic promotion with health checks and bake times (Argo Rollouts analysis) | ⬜ |
 | Real cell router (tenant → cell lookup, verified token) and a database per cell | ⬜ |
 | Istio multi-cluster | ⬜ |
