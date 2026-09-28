@@ -1,67 +1,3 @@
-# Region B, deployed by the same Argo CD that runs in region A (dev-cluster).
-# Synced from Git by the root app (root.yaml). Until scripts/setup-region.sh
-# registers the region-b cluster, these apps show an unknown-cluster error;
-# they sync on their own once it's registered.
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: region-b-frontend-api
-  namespace: argocd
-  # Being retired (phase 7): deleting this app also deletes what it deployed.
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
-  annotations:
-    # Lets Kargo's region-b Stage trigger syncs of this app.
-    kargo.akuity.io/authorized-stage: local-eks-platform:region-b
-spec:
-  project: default
-  source:
-    repoURL: https://github.com/mandar33/local-eks-platform.git
-    targetRevision: main
-    path: k8s-manifests/charts/base-api
-    helm:
-      releaseName: frontend-api
-      valueFiles:
-        - ../../apps/common/frontend-values.yaml
-        - ../../apps/region-b/frontend-values.yaml
-  destination:
-    name: region-b
-    namespace: default
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
----
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: region-b-crud-api
-  namespace: argocd
-  # Being retired (phase 7): deleting this app also deletes what it deployed.
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
-  annotations:
-    # Lets Kargo's region-b Stage trigger syncs of this app.
-    kargo.akuity.io/authorized-stage: local-eks-platform:region-b
-spec:
-  project: default
-  source:
-    repoURL: https://github.com/mandar33/local-eks-platform.git
-    targetRevision: main
-    path: k8s-manifests/charts/base-api
-    helm:
-      releaseName: crud-api
-      valueFiles:
-        - ../../apps/common/crud-values.yaml
-        - ../../apps/region-b/crud-values.yaml
-  destination:
-    name: region-b
-    namespace: default
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
----
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -94,28 +30,6 @@ spec:
     repoURL: https://github.com/mandar33/local-eks-platform.git
     targetRevision: main
     path: k8s-manifests/platform/region-b/networking
-  destination:
-    name: region-b
-    namespace: default
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
----
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: region-b-secrets
-  namespace: argocd
-  # Being retired (phase 7): deleting this app also deletes what it deployed.
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
-spec:
-  project: default
-  source:
-    repoURL: https://github.com/mandar33/local-eks-platform.git
-    targetRevision: main
-    path: k8s-manifests/platform/region-b/secrets
   destination:
     name: region-b
     namespace: default

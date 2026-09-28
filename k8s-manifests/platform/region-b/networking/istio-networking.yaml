@@ -35,17 +35,3 @@ spec:
         set:
           x-region: b
           x-cell: prod-b1
----
-apiVersion: security.istio.io/v1
-kind: AuthorizationPolicy
-metadata:
-  name: allow-frontend-to-crud
-spec:
-  selector:
-    matchLabels:
-      app: crud-api
-  action: ALLOW
-  rules:
-  - from:
-    - source:
-        principals: ["cluster.local/ns/default/sa/frontend-api"]
