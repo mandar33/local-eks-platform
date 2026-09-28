@@ -1,0 +1,8 @@
+# Environment namespaces in region A. Declared here, with Istio's sidecar
+# injection label, so they exist before any app is deployed into them.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dev
+  labels:
+    istio-injection: enabled

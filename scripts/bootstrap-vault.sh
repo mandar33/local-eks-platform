@@ -4,6 +4,7 @@
 #
 #   scripts/bootstrap-vault.sh           install, init, unseal, configure
 #   scripts/bootstrap-vault.sh unseal    unseal only (Vault seals on every restart)
+#   scripts/bootstrap-vault.sh roles     (re)write the app login roles only
 #
 # No secret is ever written to this repo:
 # - The Vault unseal key and root token go to $STATE_DIR/vault-init.json
@@ -54,8 +55,43 @@ wait_for_pod_running() {
   exit 1
 }
 
+# Which namespaces' crud-api may log in to Vault for DB credentials.
+write_app_roles() {
+  # Legacy: crud-api in default (region A before the dev namespace existed).
+  vault_run write auth/kubernetes/role/crud-api \
+    bound_service_account_names=crud-api \
+    bound_service_account_namespaces=default \
+    audience=vault \
+    token_policies=crud-api \
+    token_ttl=1h >/dev/null
+
+  # crud-api in every cell namespace (cell-a, cell-b, ...).
+  vault_run write auth/kubernetes/role/crud-api-cells \
+    bound_service_account_names=crud-api \
+    'bound_service_account_namespaces=cell-*' \
+    audience=vault \
+    token_policies=crud-api \
+    token_ttl=1h >/dev/null
+
+  # One role per environment namespace.
+  vault_run write auth/kubernetes/role/crud-api-dev \
+    bound_service_account_names=crud-api \
+    bound_service_account_namespaces=dev \
+    audience=vault \
+    token_policies=crud-api \
+    token_ttl=1h >/dev/null
+  echo "Vault roles written: crud-api (default), crud-api-cells (cell-*), crud-api-dev (dev)."
+}
+
 if [[ "${1:-}" == "unseal" ]]; then
   unseal
+  exit 0
+fi
+
+if [[ "${1:-}" == "roles" ]]; then
+  load_root_token
+  require_unsealed
+  write_app_roles
   exit 0
 fi
 
@@ -134,26 +170,12 @@ path "database/creds/crud-api" {
 }
 HCL
 
-vault_run write auth/kubernetes/role/crud-api \
-  bound_service_account_names=crud-api \
-  bound_service_account_namespaces=default \
-  audience=vault \
-  token_policies=crud-api \
-  token_ttl=1h >/dev/null
-
-# Same access for crud-api in every cell namespace (cell-a, cell-b, ...),
-# which Crossplane creates from Cell resources.
-vault_run write auth/kubernetes/role/crud-api-cells \
-  bound_service_account_names=crud-api \
-  'bound_service_account_namespaces=cell-*' \
-  audience=vault \
-  token_policies=crud-api \
-  token_ttl=1h >/dev/null
+write_app_roles
 
 log "Done"
 cat <<EOF
 Vault is issuing Postgres credentials for crud-api.
-  Check the Secret VSO created:   kubectl get secret crud-db -n default
+  Check the Secret VSO created:   kubectl get secret crud-db -n dev
   Vault UI:                       kubectl port-forward -n vault svc/vault 8200:8200
                                   then http://localhost:8200 (root token in $INIT_FILE)
   After a cluster restart, run:   scripts/bootstrap-vault.sh unseal
