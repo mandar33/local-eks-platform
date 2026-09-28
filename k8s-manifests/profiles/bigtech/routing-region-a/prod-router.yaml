@@ -8,9 +8,6 @@ apiVersion: networking.istio.io/v1
 kind: VirtualService
 metadata:
   name: prod-router
-  annotations:
-    # Moving to profiles/bigtech (phase 8): the old app must not delete it meanwhile.
-    argocd.argoproj.io/sync-options: Prune=false
 spec:
   gateways:
   - platform-gateway

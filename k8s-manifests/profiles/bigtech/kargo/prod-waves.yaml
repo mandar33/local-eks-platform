@@ -9,9 +9,6 @@ kind: Stage
 metadata:
   name: prod-a1
   namespace: local-eks-platform
-  annotations:
-    # Moving to profiles/bigtech (phase 8): the old app must not delete it meanwhile.
-    argocd.argoproj.io/sync-options: Prune=false
 spec:
   requestedFreight:
     - origin:
@@ -69,9 +66,6 @@ kind: Stage
 metadata:
   name: prod-a2
   namespace: local-eks-platform
-  annotations:
-    # Moving to profiles/bigtech (phase 8): the old app must not delete it meanwhile.
-    argocd.argoproj.io/sync-options: Prune=false
 spec:
   requestedFreight:
     - origin:
@@ -130,9 +124,6 @@ kind: Stage
 metadata:
   name: prod-b1
   namespace: local-eks-platform
-  annotations:
-    # Moving to profiles/bigtech (phase 8): the old app must not delete it meanwhile.
-    argocd.argoproj.io/sync-options: Prune=false
 spec:
   requestedFreight:
     - origin:
@@ -192,9 +183,6 @@ kind: ProjectConfig
 metadata:
   name: local-eks-platform
   namespace: local-eks-platform
-  annotations:
-    # Moving to profiles/bigtech (phase 8): the old app must not delete it meanwhile.
-    argocd.argoproj.io/sync-options: Prune=false
 spec:
   promotionPolicies:
     - stageSelector:
