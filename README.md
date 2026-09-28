@@ -102,16 +102,18 @@ Git stays the record of what runs where: every promotion is a commit you can rea
 ```mermaid
 flowchart TB
     user([Laptop]) -->|localhost:7080| lb[global-lb<br/>nginx container]
-    user -->|localhost:8080| gwa
+    user -->|"localhost:8080, dev.localhost"| gwa
+    user -->|staging.localhost:8080| gwa
     user -->|cells.localhost:8080| gwa
     user -->|localhost:9080| gwb
 
     subgraph A["Region A · kind cluster dev-cluster"]
         gwa[Istio gateway]
-        gwa -->|"90/10 weights"| def["default namespace<br/>frontend stable + canary"]
+        gwa -->|"90/10 weights"| def["dev namespace<br/>frontend stable + canary, crud"]
+        gwa --> stg["staging namespace<br/>frontend + crud"]
         gwa -->|"odd user IDs"| ca["cell-a<br/>frontend + crud"]
         gwa -->|"even user IDs"| cb["cell-b<br/>frontend + crud"]
-        pg[(Postgres)]
+        pg[(Postgres<br/>crud_dev, crud_staging,<br/>crud for cells)]
         vault[Vault]
         argo[Argo CD]
         xp[Crossplane]
@@ -121,17 +123,19 @@ flowchart TB
 
     subgraph B["Region B · kind cluster region-b"]
         gwb[Istio gateway] --> defb["default namespace<br/>frontend + crud"]
+        pgb[(Postgres)]
+        defb --> pgb
     end
 
     lb -->|round robin + failover| gwa
     lb --> gwb
-    defb -->|"NodePort 30432"| pg
+    vault -. "manages users<br/>NodePort 30432" .-> pgb
     defb -. "DB users via auth mount<br/>kubernetes-region-b" .-> vault
     argo -. deploys .-> defb
 ```
 
-- **Region A** (`dev-cluster`) runs everything, including the shared services: Postgres, Vault, Zot, Argo CD, Kargo and Crossplane.
-- **Region B** (`region-b`) runs its own gateway, frontend, crud-api and Flipt. It reads region A's Postgres and gets DB users from region A's Vault. Argo CD in region A deploys it.
+- **Region A** (`dev-cluster`) runs dev and staging (each in its own namespace with its own database) and the shared services: Postgres, Vault, Zot, Argo CD, Kargo and Crossplane.
+- **Region B** (`region-b`) runs its own gateway, frontend, crud-api and Flipt. It has its own Postgres; region A's Vault creates its DB users there (through NodePort 30432 on region B). Argo CD in region A deploys it.
 - **Cells** are complete copies of the app stack inside region A, each serving a slice of users. A `Cell` resource (Crossplane) creates one.
 - **global-lb** spreads requests across both regions and retries in the other region if one fails, like Route 53 failover routing would.
 
@@ -230,7 +234,7 @@ Argo CD Applications in `k8s-manifests/argocd/region-a.yaml` (paths below are un
 | `frontend-api-canary-dev` | `charts/base-api` + the frontend values + `apps/dev/frontend-canary-values.yaml` | The frontend canary Deployment (nothing when `canary.enabled: false`) |
 | `crossplane-dev` | `platform/region-a/crossplane/` | The `Cell` API |
 | `cell-a`, `cell-b` | `platform/region-a/cells/` (one file each) | One `Cell` each; Crossplane then creates `cell-<name>-frontend-api` and `cell-<name>-crud-api` apps |
-| `cross-region-dev` | `platform/region-a/regions/` | NodePorts 30820 (Vault) and 30432 (Postgres) for region B |
+| `cross-region-dev` | `platform/region-a/regions/` | NodePort 30820: region B's operator reaches Vault |
 | `region-b-*` (5 apps, in `argocd/region-b.yaml`) | `platform/region-b/`, `apps/region-b/` + the chart | Region B's frontend, crud-api, Flipt, networking and DB credentials, deployed to the `region-b` cluster |
 
 ## Setup from scratch
@@ -573,7 +577,7 @@ Measured here: 176 requests during a 25-second region A outage, all returned 200
 #   region-b: frontend-api 1.1.2 (promoted by Kargo)
 ```
 
-What's simplified: region B has no database or Vault of its own, so region A is still a single point of failure for data. Real multi-region setups replicate the database and run Vault per region (or use a managed service), and often connect the service meshes (Istio multi-cluster) so services can fail over individually.
+What's simplified: region B has its own database, but no Vault of its own and no replication between the two databases, so region A's Vault is still a single point of failure for new DB logins. Real multi-region setups replicate the database and run Vault per region (or use a managed service), and often connect the service meshes (Istio multi-cluster) so services can fail over individually.
 
 ### Autoscaling (HPA)
 
