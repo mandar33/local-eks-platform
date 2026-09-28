@@ -1,0 +1,57 @@
+# Prod (small profile), synced by the prod-kargo app: one stage, promoted by
+# hand once staging looks good. Only versions staging already has.
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: prod
+  namespace: local-eks-platform
+spec:
+  requestedFreight:
+    - origin:
+        kind: Warehouse
+        name: app-images
+      sources:
+        stages:
+          - staging
+  promotionTemplate:
+    spec:
+      vars:
+        - name: gitRepo
+          value: https://github.com/mandar33/local-eks-platform.git
+        - name: frontend
+          value: zot.registry.svc.cluster.local:5000/frontend-api
+        - name: crud
+          value: zot.registry.svc.cluster.local:5000/crud-api
+      steps:
+        - uses: git-clone
+          config:
+            repoURL: ${{ vars.gitRepo }}
+            checkout:
+              - branch: main
+                path: ./repo
+        - uses: yaml-update
+          config:
+            path: ./repo/k8s-manifests/apps/prod/prod/frontend-values.yaml
+            updates:
+              - key: image.tag
+                value: ${{ imageFrom(vars.frontend).Tag }}
+        - uses: yaml-update
+          config:
+            path: ./repo/k8s-manifests/apps/prod/prod/crud-values.yaml
+            updates:
+              - key: image.tag
+                value: ${{ imageFrom(vars.crud).Tag }}
+        - uses: git-commit
+          config:
+            path: ./repo
+            message: "prod: frontend-api ${{ imageFrom(vars.frontend).Tag }}, crud-api ${{ imageFrom(vars.crud).Tag }} (promoted by Kargo)"
+        - uses: git-push
+          config:
+            path: ./repo
+        - uses: argocd-update
+          config:
+            apps:
+              - name: frontend-api-prod
+                namespace: argocd
+              - name: crud-api-prod
+                namespace: argocd

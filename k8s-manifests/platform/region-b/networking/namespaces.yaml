@@ -7,3 +7,12 @@ metadata:
   name: prod-b1
   labels:
     istio-injection: enabled
+---
+# Prod in the small profile (profiles/small/). Exists in both profiles; an
+# empty namespace costs nothing.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: prod
+  labels:
+    istio-injection: enabled

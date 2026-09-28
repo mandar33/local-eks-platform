@@ -1,3 +1,7 @@
+# Profile "bigtech": prod is made of cells in two regions, released in waves.
+# Synced by the profile app (argocd/profile.yaml); scripts/profile.sh switches
+# between profiles. Only this file is read here (subfolders belong to the
+# apps below).
 # Prod cells (bigtech profile). Each cell is a complete copy of the app stack
 # serving a slice of users, in its own namespace with its own database.
 #
@@ -72,3 +76,72 @@ spec:
             duration: 15s
             factor: 2
             maxDuration: 5m
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: prod-routing-region-a
+  namespace: argocd
+  # Switching profiles removes this app's resources with it.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  # Region A cell router: localhost:8080 -> prod-a1 / prod-a2.
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/profiles/bigtech/routing-region-a
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: prod-routing-region-b
+  namespace: argocd
+  # Switching profiles removes this app's resources with it.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  # Region B front door: localhost:9080 -> prod-b1.
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/profiles/bigtech/routing-region-b
+  destination:
+    name: region-b
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: prod-kargo
+  namespace: argocd
+  # Switching profiles removes this app's resources with it.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  # Kargo stages for prod (waves) and auto-promotion.
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/profiles/bigtech/kargo
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: local-eks-platform
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

@@ -1,0 +1,23 @@
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: frontend-routing
+  annotations:
+    # Moving to profiles/bigtech (phase 8): the old app must not delete it meanwhile.
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  gateways:
+  - platform-gateway
+  hosts:
+  - "*"
+  http:
+  - route:
+    - destination:
+        host: frontend-api-svc.prod-b1.svc.cluster.local
+        port:
+          number: 80
+    headers:
+      response:
+        set:
+          x-region: b
+          x-cell: prod-b1

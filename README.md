@@ -203,7 +203,7 @@ local-eks-platform/
 │   └── argocd/                  # Argo CD Applications: region-a.yaml, region-b.yaml
 ├── notes/                       # Findings, future improvements, EKS Auto Mode design
 ├── platform/vault/              # Helm values for Vault
-├── platform/global-lb/          # nginx config for the global load balancer
+├── platform/global-lb/          # nginx configs for the global load balancer, one per profile
 ├── platform/github-runner/      # Dockerfile for the self-hosted CI runner
 ├── scripts/
 │   ├── bootstrap-vault.sh       # Install + configure Vault; `unseal` after restarts

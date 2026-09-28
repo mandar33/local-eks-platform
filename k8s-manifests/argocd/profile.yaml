@@ -1,0 +1,22 @@
+# Which prod the platform runs. Change it with scripts/profile.sh:
+#   bigtech  prod = cells in two regions, released in waves (profiles/bigtech/)
+#   small    prod = one copy in region B, 2 replicas + canary (profiles/small/)
+# dev, staging and the shared services are the same in both.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: profile
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/profiles/bigtech
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

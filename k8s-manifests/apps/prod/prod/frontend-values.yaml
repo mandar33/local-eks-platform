@@ -1,0 +1,15 @@
+# Prod (small profile, region B), layered on apps/common/frontend-values.yaml.
+# Kargo's "prod" Stage updates image.tag.
+image:
+  tag: 1.2.8
+
+env:
+  CRUD_API_URL: http://crud-api-svc.prod.svc.cluster.local
+
+# One copy of prod, so it needs its own redundancy: never fewer than 2 pods,
+# and node drains keep at least 1 running.
+autoscaling:
+  minReplicas: 2
+  maxReplicas: 4
+podDisruptionBudget:
+  minAvailable: 1

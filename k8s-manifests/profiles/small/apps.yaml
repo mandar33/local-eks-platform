@@ -1,0 +1,166 @@
+# Profile "small": prod is one copy (2 replicas + a canary) in region B, the
+# way most companies with a few teams run it. Synced by the profile app
+# (argocd/profile.yaml); scripts/profile.sh switches between profiles. Only
+# this file is read here (subfolders belong to the apps below).
+#
+# Prod: localhost:9080, and localhost:7080 (global-lb, region B only).
+# Region A serves dev.localhost and staging.localhost only.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: frontend-api-prod
+  namespace: argocd
+  annotations:
+    # Lets Kargo's "prod" Stage trigger syncs of this app.
+    kargo.akuity.io/authorized-stage: local-eks-platform:prod
+  # Switching profiles removes this app's resources with it.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  # Prod frontend (region B).
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/charts/base-api
+    helm:
+      releaseName: frontend-api
+      valueFiles:
+        - ../../apps/common/frontend-values.yaml
+        - ../../apps/prod/prod/frontend-values.yaml
+  destination:
+    name: region-b
+    namespace: prod
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    # The prod namespace comes from region B's networking app; retry until it exists.
+    retry:
+      limit: 20
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: crud-api-prod
+  namespace: argocd
+  annotations:
+    # Lets Kargo's "prod" Stage trigger syncs of this app.
+    kargo.akuity.io/authorized-stage: local-eks-platform:prod
+  # Switching profiles removes this app's resources with it.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  # Prod crud-api (region B, region B's own Postgres).
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/charts/base-api
+    helm:
+      releaseName: crud-api
+      valueFiles:
+        - ../../apps/common/crud-values.yaml
+        - ../../apps/prod/prod/crud-values.yaml
+  destination:
+    name: region-b
+    namespace: prod
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    # The prod namespace comes from region B's networking app; retry until it exists.
+    retry:
+      limit: 20
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: frontend-api-prod-canary
+  namespace: argocd
+  # Switching profiles removes this app's resources with it.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  # Prod frontend canary: nothing runs while canary.enabled is false.
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/charts/base-api
+    helm:
+      releaseName: frontend-api-canary
+      valueFiles:
+        - ../../apps/common/frontend-values.yaml
+        - ../../apps/prod/prod/frontend-values.yaml
+        - ../../apps/prod/prod/frontend-canary-values.yaml
+  destination:
+    name: region-b
+    namespace: prod
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      # With canary.enabled: false the release is empty; let Argo CD remove it.
+      allowEmpty: true
+    # The prod namespace comes from region B's networking app; retry until it exists.
+    retry:
+      limit: 20
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: prod-routing-region-b
+  namespace: argocd
+  # Switching profiles removes this app's resources with it.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  # Region B front door: localhost:9080 -> prod (stable + canary weights).
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/profiles/small/routing-region-b
+  destination:
+    name: region-b
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: prod-kargo
+  namespace: argocd
+  # Switching profiles removes this app's resources with it.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  # Kargo stage "prod".
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/profiles/small/kargo
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: local-eks-platform
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

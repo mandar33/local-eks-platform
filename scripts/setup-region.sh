@@ -95,8 +95,8 @@ setup_vault() {
 
 # crud-api in the region logs in here and may read only the region's own
 # database (see setup_database). REGION_NAMESPACES: where crud-api runs in
-# this region (the prod cell, prod-b1).
-REGION_NAMESPACES="${REGION_NAMESPACES:-prod-b1}"
+# this region: prod-b1 (bigtech profile) and prod (small profile).
+REGION_NAMESPACES="${REGION_NAMESPACES:-prod-b1,prod}"
 write_region_role() {
   vault_run write "auth/kubernetes-$REGION/role/crud-api" \
     bound_service_account_names=crud-api \
@@ -161,17 +161,25 @@ HCL
   echo "Vault issues $REGION's DB users at database/creds/crud-api-$REGION."
 }
 
+# The profile Git says is active (k8s-manifests/argocd/profile.yaml).
+current_profile() { sed -n 's#^ *path: k8s-manifests/profiles/##p' "$REPO_ROOT/k8s-manifests/argocd/profile.yaml"; }
+
 setup_lb() {
-  log "Starting the global load balancer on localhost:7080"
+  local profile conf
+  profile="${PROFILE:-$(current_profile)}"
+  log "Starting the global load balancer on localhost:7080 (profile $profile)"
   docker rm -f global-lb >/dev/null 2>&1 || true
   docker create --name global-lb --restart unless-stopped --network kind \
     -p 127.0.0.1:7080:7080 "$LB_IMAGE" >/dev/null
-  local conf="$REPO_ROOT/platform/global-lb/nginx.conf"
+  conf="$REPO_ROOT/platform/global-lb/nginx-$profile.conf"
   # Docker for Windows needs a Windows path (Git Bash path conversion is off).
   command -v cygpath >/dev/null 2>&1 && conf="$(cygpath -w "$conf")"
   docker cp "$conf" global-lb:/etc/nginx/nginx.conf
   docker start global-lb >/dev/null
-  echo "http://localhost:7080 spreads requests across both regions and fails over."
+  case "$profile" in
+    bigtech) echo "http://localhost:7080 spreads requests across both regions' prod cells and fails over." ;;
+    *)       echo "http://localhost:7080 sends requests to prod in region B." ;;
+  esac
 }
 
 case "${1:-all}" in

@@ -1,0 +1,11 @@
+# Prod canary (small profile), layered on the two frontend files by the
+# frontend-api-prod-canary app. Same workflow as dev's canary (each step a
+# commit): enable + set the new tag here, raise the weight in
+# profiles/small/routing-region-b/, promote the tag with Kargo if it behaves,
+# then weight 0 and enabled: false.
+track: canary
+canary:
+  enabled: false
+  replicas: 1
+image:
+  tag: 1.2.8
