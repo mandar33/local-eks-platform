@@ -1,0 +1,46 @@
+# Argo CD projects: what an app may deploy, and where.
+#   nonprod  dev and staging namespaces in region A only
+#   prod     the prod namespaces (cells or small-profile prod) only
+# Neither may create cluster-wide objects (namespaces, CRDs, RBAC): those come
+# from the platform apps, which stay in the "default" project.
+# A nonprod app pointed at a prod namespace is refused, whatever its Git says.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: nonprod
+  namespace: argocd
+  annotations:
+    # Before the apps that use it.
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  description: dev and staging
+  sourceRepos:
+    - https://github.com/mandar33/local-eks-platform.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: dev
+    - server: https://kubernetes.default.svc
+      namespace: staging
+  clusterResourceWhitelist: []
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: prod
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  description: prod (bigtech cells or small-profile prod)
+  sourceRepos:
+    - https://github.com/mandar33/local-eks-platform.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: prod-a1
+    - server: https://kubernetes.default.svc
+      namespace: prod-a2
+    - name: region-b
+      namespace: prod-b1
+    - name: region-b
+      namespace: prod
+  clusterResourceWhitelist: []

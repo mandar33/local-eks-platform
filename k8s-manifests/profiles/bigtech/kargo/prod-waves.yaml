@@ -1,7 +1,8 @@
 # Prod waves (bigtech profile), synced by the prod-kargo app.
 # staging -> prod-a1 (wave 1, the canary cell: promoted by hand)
 #         -> prod-a2 (wave 2) -> prod-b1 (wave 3, region B)
-# Waves 2 and 3 promote themselves (ProjectConfig below) once the release has
+# Waves 2 and 3 promote themselves (label platform.local/auto-promote, see the
+# ProjectConfig in platform/region-a/kargo/) once the release has
 # run in the previous cell for requiredSoakTime (the bake time).
 # Wave 1: one cell in region A. Only versions staging already has.
 apiVersion: kargo.akuity.io/v1alpha1
@@ -66,6 +67,9 @@ kind: Stage
 metadata:
   name: prod-a2
   namespace: local-eks-platform
+  labels:
+    # Kargo promotes this stage by itself (ProjectConfig in platform/region-a/kargo/).
+    platform.local/auto-promote: "true"
 spec:
   requestedFreight:
     - origin:
@@ -124,6 +128,9 @@ kind: Stage
 metadata:
   name: prod-b1
   namespace: local-eks-platform
+  labels:
+    # Kargo promotes this stage by itself (ProjectConfig in platform/region-a/kargo/).
+    platform.local/auto-promote: "true"
 spec:
   requestedFreight:
     - origin:
@@ -175,19 +182,3 @@ spec:
                 namespace: argocd
               - name: crud-api-prod-b1
                 namespace: argocd
----
-# Auto-promotion for the later waves. Wave 1 stays manual: a person decides a
-# release goes to prod.
-apiVersion: kargo.akuity.io/v1alpha1
-kind: ProjectConfig
-metadata:
-  name: local-eks-platform
-  namespace: local-eks-platform
-spec:
-  promotionPolicies:
-    - stageSelector:
-        name: prod-a2
-      autoPromotionEnabled: true
-    - stageSelector:
-        name: prod-b1
-      autoPromotionEnabled: true

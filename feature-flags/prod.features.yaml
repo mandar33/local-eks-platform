@@ -1,0 +1,10 @@
+# Flags for prod (Flipt namespace "prod"). Each environment's frontend asks its
+# own namespace (FLIPT_NAMESPACE in apps/*/frontend-values.yaml), so a flag can
+# change in prod without touching the others. Flipt reads every
+# *.features.yaml here from GitHub every 30 seconds.
+namespace: prod
+flags:
+  - key: enable-new-schema
+    name: Enable New Database Schema
+    type: BOOLEAN_FLAG_TYPE
+    enabled: true

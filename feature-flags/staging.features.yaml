@@ -1,0 +1,10 @@
+# Flags for staging (Flipt namespace "staging"). Each environment's frontend asks its
+# own namespace (FLIPT_NAMESPACE in apps/*/frontend-values.yaml), so a flag can
+# change in staging without touching the others. Flipt reads every
+# *.features.yaml here from GitHub every 30 seconds.
+namespace: staging
+flags:
+  - key: enable-new-schema
+    name: Enable New Database Schema
+    type: BOOLEAN_FLAG_TYPE
+    enabled: true

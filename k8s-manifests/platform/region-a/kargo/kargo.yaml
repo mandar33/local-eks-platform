@@ -108,6 +108,9 @@ kind: Stage
 metadata:
   name: staging
   namespace: local-eks-platform
+  labels:
+    # Kargo promotes this stage by itself (ProjectConfig in platform/region-a/kargo/).
+    platform.local/auto-promote: "true"
 spec:
   requestedFreight:
     - origin:
@@ -158,6 +161,23 @@ spec:
                 namespace: argocd
               - name: crud-api-staging
                 namespace: argocd
+---
+# Auto-promotion, for every stage labelled platform.local/auto-promote: "true"
+# (staging here; prod-a2 and prod-b1 in the bigtech profile). Kargo promotes
+# new Freight into them as soon as the stage before has verified it (and, for
+# the waves, after their requiredSoakTime). Not dev: CI promotes dev after your
+# approval on GitHub. Not the first prod stage: a person decides that.
+apiVersion: kargo.akuity.io/v1alpha1
+kind: ProjectConfig
+metadata:
+  name: local-eks-platform
+  namespace: local-eks-platform
+spec:
+  promotionPolicies:
+    - stageSelector:
+        matchLabels:
+          platform.local/auto-promote: "true"
+      autoPromotionEnabled: true
 ---
 # GitHub credentials: Vault -> Vault Secrets Operator -> labelled Secret.
 apiVersion: v1
