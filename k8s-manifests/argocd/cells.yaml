@@ -15,6 +15,9 @@ kind: ApplicationSet
 metadata:
   name: prod-cells
   namespace: argocd
+  annotations:
+    # Moving to profiles/bigtech (phase 8): the old app must not delete it meanwhile.
+    argocd.argoproj.io/sync-options: Prune=false
 spec:
   goTemplate: true
   goTemplateOptions: ["missingkey=error"]
