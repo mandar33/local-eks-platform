@@ -1,0 +1,15 @@
+{{- if and (gt (int .Values.podDisruptionBudget.minAvailable) 0) (ne .Values.track "canary") }}
+# Node drains (upgrades, EKS Auto Mode replacing nodes) wait until evicting a
+# pod would still leave minAvailable running. Pair with minReplicas above it,
+# or drains block.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Values.nameOverride }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      app: {{ .Values.nameOverride }}
+{{- end }}

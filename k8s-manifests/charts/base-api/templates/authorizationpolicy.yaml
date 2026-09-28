@@ -1,0 +1,21 @@
+{{- if and .Values.allowCallersFrom (ne .Values.track "canary") }}
+# Istio: only the listed apps (by ServiceAccount, same namespace) may call
+# this one. Covers stable and canary pods, which share the `app` label.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-callers-to-{{ .Values.nameOverride }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ .Values.nameOverride }}
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+            {{- range .Values.allowCallersFrom }}
+              - cluster.local/ns/{{ $.Release.Namespace }}/sa/{{ . }}
+            {{- end }}
+{{- end }}

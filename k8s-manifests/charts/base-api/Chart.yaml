@@ -1,6 +1,6 @@
 apiVersion: v2
 name: base-api
-description: Reusable chart for HTTP API services (Deployment, Service, HPA)
+description: Reusable chart for HTTP API services (Deployment, Service, HPA; optional Vault DB credentials, AuthorizationPolicy, PDB)
 type: application
-version: 0.1.0
+version: 0.2.0
 appVersion: "0.1.0"

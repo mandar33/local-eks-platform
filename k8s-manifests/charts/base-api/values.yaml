@@ -19,3 +19,26 @@ autoscaling:
 env: {}
 # Env vars read from a Kubernetes Secret: NAME: {secret: <secret name>, key: <key>}
 secretEnv: {}
+
+# Optional extras, all off by default. Cells turn them on; they're what the
+# Crossplane Cell composition used to add. (The namespace's istio-injection
+# label comes from Argo CD's managedNamespaceMetadata, not from this chart.)
+
+# Vault Secrets Operator resources that keep a Secret filled with short-lived
+# DB credentials and restart this Deployment when they rotate.
+vaultDbCredentials:
+  enabled: false
+  address: http://vault.vault.svc.cluster.local:8200
+  authMount: kubernetes   # kubernetes-region-b for region B
+  role: ""                # Vault role bound to this app's ServiceAccount + namespace
+  mount: database
+  path: creds/crud-api
+  secretName: crud-db
+
+# Istio AuthorizationPolicy: only these apps (ServiceAccount names in the same
+# namespace) may call this one. Empty = no policy.
+allowCallersFrom: []
+
+# PodDisruptionBudget. 0 = none. Needs minReplicas > minAvailable.
+podDisruptionBudget:
+  minAvailable: 0

@@ -62,7 +62,7 @@ Four Snyk products, each tried on this repo. Run the scan, read the results, fix
 
 | Item | Status |
 |---|---|
-| dev → staging → prod restructure, profiles `bigtech` (cells, waves) / `small` ([design](environments-design.md)) | 🔜 phases 1 (folders) and 2 (app of apps) done 28 Sep, phase 3 (chart does the cell extras) next |
+| dev → staging → prod restructure, profiles `bigtech` (cells, waves) / `small` ([design](environments-design.md)) | 🔜 phases 1–3 done 28 Sep (folders, app of apps, chart extras); phase 4 (dev namespace) next |
 | Automatic promotion with health checks and bake times (Argo Rollouts analysis) | ⬜ |
 | Real cell router (tenant → cell lookup, verified token) and a database per cell | ⬜ |
 | Istio multi-cluster | ⬜ |
@@ -97,6 +97,7 @@ Four Snyk products, each tried on this repo. Run the scan, read the results, fix
 
 | Date | What | Commit |
 |---|---|---|
+| 28 Sep | Phase 3: `base-api` 0.2.0 with optional Vault DB credentials, AuthorizationPolicy, PDB (off by default; renders unchanged) | – |
 | 28 Sep | Phase 2: `root` app of apps; app lists now come from Git, only `root.yaml` is applied by hand | – |
 | 28 Sep | Phase 1: `apps/common` + per-copy values, `platform/region-a` and `region-b`, `argocd/`; renders identical, all apps green | `7899393` + next |
 | 28 Sep | Environments design: profiles `bigtech` / `small`, cells via ApplicationSet | `ca1da6e` |
