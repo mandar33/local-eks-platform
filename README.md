@@ -698,6 +698,7 @@ Not yet tested: a clean rebuild from an empty laptop using "Setup from scratch".
 
 | Note | What's in it |
 |---|---|
+| [notes/roadmap.md](notes/roadmap.md) | **Where things stand:** exercises done and next, platform work by group, dates to remember. |
 | [notes/findings.md](notes/findings.md) | Every problem hit while building this (Norton, cgroup v1, canary 503s, Vault Secrets Operator after a seal, stale DB connections, and more): cause, fix, and where it's handled now. Plus measured timings. |
 | [notes/future-improvements.md](notes/future-improvements.md) | Known gaps, starting with the untested clean rebuild; resilience, security and delivery improvements. |
 | [notes/eks-auto-mode.md](notes/eks-auto-mode.md) | How each part behaves on Amazon EKS Auto Mode with ECR, CI via GitHub OIDC, Kargo and Argo CD: what stays, what changes, what to plan for, and a migration order. |
