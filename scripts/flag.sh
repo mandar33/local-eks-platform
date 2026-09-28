@@ -4,6 +4,10 @@
 #   scripts/flag.sh 1              is the flag on for user 1?
 #   scripts/flag.sh 2 beta         ...for user 2, who is on the "beta" plan?
 #   scripts/flag.sh users          users 1 to 8 at once
+#   FLIPT_NAMESPACE=prod scripts/flag.sh 1   ...in prod's flags (default: dev)
+#
+# Each environment has its own flags: feature-flags/<env>.features.yaml
+# (Flipt namespaces dev, staging, prod). Region A's Flipt is asked here.
 #
 # Flipt is only reachable inside the cluster, so this runs curl from a small
 # pod called flag-check (created the first time, reused after).
@@ -12,6 +16,7 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 FLAG="${FLAG:-enable-new-schema}"
+NAMESPACE="${FLIPT_NAMESPACE:-dev}"
 URL="http://flipt.default.svc.cluster.local:8080/evaluate/v1/boolean"
 
 ensure_pod() {
@@ -26,7 +31,7 @@ ask() {
   [[ -n "$plan" ]] && context="{\"plan\":\"$plan\"}"
   answer="$(k exec -n default flag-check -c flag-check -- curl -s -X POST "$URL" \
     -H 'Content-Type: application/json' \
-    -d "{\"namespaceKey\":\"default\",\"flagKey\":\"$FLAG\",\"entityId\":\"$user\",\"context\":$context}")"
+    -d "{\"namespaceKey\":\"$NAMESPACE\",\"flagKey\":\"$FLAG\",\"entityId\":\"$user\",\"context\":$context}")"
   enabled="$(grep -oE '"enabled": ?(true|false)' <<<"$answer" | grep -oE 'true|false' || true)"
   reason="$(grep -oE '"reason": ?"[A-Z_]+"' <<<"$answer" | grep -oE '[A-Z_]{3,}' || true)"
   if [[ -z "$enabled" ]]; then
@@ -37,7 +42,7 @@ ask() {
     DEFAULT_EVALUATION_REASON) reason="no rule matched, so the flag's default" ;;
     MATCH_EVALUATION_REASON)   reason="a rollout rule matched" ;;
   esac
-  printf 'user %-3s %-10s %-4s (%s)\n' "$user" "${plan:+[$plan]}" "$([[ $enabled == true ]] && echo ON || echo off)" "$reason"
+  printf '%-7s user %-3s %-10s %-4s (%s)\n' "$NAMESPACE" "$user" "${plan:+[$plan]}" "$([[ $enabled == true ]] && echo ON || echo off)" "$reason"
 }
 
 ensure_pod

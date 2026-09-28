@@ -49,7 +49,8 @@ spec:
       finalizers:
         - resources-finalizer.argocd.argoproj.io
     spec:
-      project: default
+      # Prod apps may only deploy into prod namespaces (argocd/projects.yaml).
+      project: prod
       source:
         repoURL: https://github.com/mandar33/local-eks-platform.git
         targetRevision: main

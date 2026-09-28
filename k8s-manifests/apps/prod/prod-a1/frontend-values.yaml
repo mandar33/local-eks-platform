@@ -4,4 +4,5 @@ image:
   tag: 1.2.8
 
 env:
+  FLIPT_NAMESPACE: prod   # this environment's flags (feature-flags/prod.features.yaml)
   CRUD_API_URL: http://crud-api-svc.prod-a1.svc.cluster.local

@@ -13,7 +13,7 @@ metadata:
     # Lets Kargo's "dev" Stage trigger syncs of this app (see kargo/).
     kargo.akuity.io/authorized-stage: local-eks-platform:dev
 spec:
-  project: default
+  project: nonprod
   source:
     repoURL: https://github.com/mandar33/local-eks-platform.git
     targetRevision: main
@@ -40,7 +40,7 @@ metadata:
     # Lets Kargo's "dev" Stage trigger syncs of this app (see kargo/).
     kargo.akuity.io/authorized-stage: local-eks-platform:dev
 spec:
-  project: default
+  project: nonprod
   source:
     repoURL: https://github.com/mandar33/local-eks-platform.git
     targetRevision: main
@@ -67,7 +67,7 @@ metadata:
     # Lets Kargo's "staging" Stage trigger syncs of this app (see kargo/).
     kargo.akuity.io/authorized-stage: local-eks-platform:staging
 spec:
-  project: default
+  project: nonprod
   source:
     repoURL: https://github.com/mandar33/local-eks-platform.git
     targetRevision: main
@@ -101,7 +101,7 @@ metadata:
     # Lets Kargo's "staging" Stage trigger syncs of this app (see kargo/).
     kargo.akuity.io/authorized-stage: local-eks-platform:staging
 spec:
-  project: default
+  project: nonprod
   source:
     repoURL: https://github.com/mandar33/local-eks-platform.git
     targetRevision: main
@@ -222,7 +222,7 @@ metadata:
   name: frontend-api-canary-dev
   namespace: argocd
 spec:
-  project: default
+  project: nonprod
   source:
     repoURL: https://github.com/mandar33/local-eks-platform.git
     targetRevision: main
