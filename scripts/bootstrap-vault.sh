@@ -76,13 +76,13 @@ write_app_roles() {
     token_ttl=1h >/dev/null
 
   # One role per environment namespace, reading only that environment's
-  # database. dev keeps the shared-database policy (crud-api) too, so its
-  # current credentials stay renewable while it switches to crud_dev.
+  # database. A policy change reaches the Vault Secrets Operator only when it
+  # logs in again: restart it (as `unseal` does) after changing one here.
   vault_run write auth/kubernetes/role/crud-api-dev \
     bound_service_account_names=crud-api \
     bound_service_account_namespaces=dev \
     audience=vault \
-    token_policies=crud-api,crud-api-dev \
+    token_policies=crud-api-dev \
     token_ttl=1h >/dev/null
   vault_run write auth/kubernetes/role/crud-api-staging \
     bound_service_account_names=crud-api \

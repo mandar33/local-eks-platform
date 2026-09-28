@@ -62,7 +62,7 @@ Four Snyk products, each tried on this repo. Run the scan, read the results, fix
 
 | Item | Status |
 |---|---|
-| dev → staging → prod restructure, profiles `bigtech` (cells, waves) / `small` ([design](environments-design.md)) | 🔜 phases 1–4 done 28 Sep (folders, app of apps, chart extras, dev namespace); phase 5 (staging + a database per env) next |
+| dev → staging → prod restructure, profiles `bigtech` (cells, waves) / `small` ([design](environments-design.md)) | 🔜 phases 1–5 done 28 Sep (folders, app of apps, chart extras, dev namespace, staging + a database per env); phase 6 (region B's own Postgres) next |
 | Automatic promotion with health checks and bake times (Argo Rollouts analysis) | ⬜ |
 | Real cell router (tenant → cell lookup, verified token) and a database per cell | ⬜ |
 | Istio multi-cluster | ⬜ |
@@ -97,6 +97,7 @@ Four Snyk products, each tried on this repo. Run the scan, read the results, fix
 
 | Date | What | Commit |
 |---|---|---|
+| 28 Sep | Phase 5: staging (`staging.localhost:8080`, Kargo `dev → staging → region-b`), databases `crud_dev` / `crud_staging` each with its own Vault connection and role (`bootstrap-vault.sh databases`); ~8 min dev `500` from two operator surprises (findings) | `7adefd4` |
 | 28 Sep | Phase 4: dev apps in namespace `dev` (Vault role `crud-api-dev`, access rule from the chart), `dev.localhost:8080`; ~6 min of 503 from a misplaced DestinationRule (findings) | `2955ae1`, `dd53162` |
 | 28 Sep | Phase 3: `base-api` 0.2.0 with optional Vault DB credentials, AuthorizationPolicy, PDB (off by default; renders unchanged) | – |
 | 28 Sep | Phase 2: `root` app of apps; app lists now come from Git, only `root.yaml` is applied by hand | – |
