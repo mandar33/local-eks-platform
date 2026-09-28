@@ -1,4 +1,5 @@
-# Region B's front door (localhost:9080). Every response says x-region: b.
+# Region B's front door (localhost:9080): its prod cell, prod-b1. Every
+# response says x-region: b.
 apiVersion: networking.istio.io/v1
 kind: Gateway
 metadata:
@@ -26,13 +27,14 @@ spec:
   http:
   - route:
     - destination:
-        host: frontend-api-svc.default.svc.cluster.local
+        host: frontend-api-svc.prod-b1.svc.cluster.local
         port:
           number: 80
     headers:
       response:
         set:
           x-region: b
+          x-cell: prod-b1
 ---
 apiVersion: security.istio.io/v1
 kind: AuthorizationPolicy
