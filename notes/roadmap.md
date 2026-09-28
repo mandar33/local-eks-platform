@@ -20,7 +20,7 @@ Status: ✅ done · 🔜 next · ⏳ waiting on a decision · ⬜ later
 | 8 | Canary release: 10% of users to a new version | ⬜ | Two commits: pods first, then weights |
 | 9 | Add and remove a route; see who may call whom | ⬜ | |
 | 10 | Add a new cell, then survive losing a region | ⬜ | |
-| – | Round 3: try the new Kargo flow (`1.2.9` through all four stages) | ⬜ | After the docs update |
+| – | Round 3: a release through `dev → staging (automatic) → prod-a1 → prod-a2 → prod-b1` | 🔜 | Docs are updated. Also the first real test of automatic staging and of the walkthrough in the guide |
 | – | Final: restructure into dev → staging → prod | 🔜 | Design ready: [environments-design.md](environments-design.md), 10 phases |
 
 ## Snyk track (prep for work training)
@@ -97,6 +97,7 @@ Four Snyk products, each tried on this repo. Run the scan, read the results, fix
 
 | Date | What | Commit |
 |---|---|---|
+| 28 Sep | Docs: README rewritten for the new layout; HTML guide updated (local only) incl. Lab 12 cells/waves, new Lab 14 profiles, layout and ApplicationSet diagrams. Flag 50% split re-measured in Flipt namespace `dev`: same users as before, prod untouched. Automatic staging still untested: first real run is Round 3 | `c2b9a75`, `18b5764`, `94d294e` |
 | 28 Sep | Phase 9: Argo CD projects `nonprod` / `prod` (tested: a nonprod app aimed at `prod-a1` is refused); staging auto-promotes once dev verifies (untested until the next release, Round 3); Flipt namespaces `dev` / `staging` / `prod`, `FLIPT_NAMESPACE` per frontend, `flag.sh` per namespace. 0 failed of 90 requests | `cd8c972`, `ed042c1` + next |
 | 28 Sep | Phase 8: profiles `bigtech` / `small` (`k8s-manifests/profiles/`), switched by `scripts/profile.sh` (one Git line + global-lb config). Tested both ways: prod back in ~20 s (small) and ~13 s (bigtech), 1 failed check on `:9080` during the first switch. Memory: small ≈ 8.3 GB, bigtech ≈ 8.7 GB | `ed514ec` … `f373fa7` |
 | 28 Sep | Phase 7 waves proven: `prod-a2` promoted itself 13 min after `prod-a1`, `prod-b1` 11 min later; 315 requests, 0 failed | – |
