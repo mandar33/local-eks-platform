@@ -3,7 +3,7 @@
 #   CI pushes frontend-api:1.2.N and crud-api:1.2.N to Zot
 #     -> the Warehouse "app-images" sees both and records them as one Freight
 #        (a matched pair: they always travel together)
-#     -> dev -> region-b -> cell-a -> cell-b
+#     -> dev -> staging -> region-b -> cell-a -> cell-b
 #        each Stage accepts only Freight the stage before it already has
 #     -> a Stage writes both image tags into its own files in Git, commits as
 #        "Kargo", pushes, and asks Argo CD to sync
@@ -100,7 +100,65 @@ spec:
               - name: crud-api-dev
                 namespace: argocd
 ---
-# Region B: only versions dev already has.
+# Staging (region A, namespace staging, own database): only versions dev
+# already has.
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: staging
+  namespace: local-eks-platform
+spec:
+  requestedFreight:
+    - origin:
+        kind: Warehouse
+        name: app-images
+      sources:
+        stages:
+          - dev
+  promotionTemplate:
+    spec:
+      vars:
+        - name: gitRepo
+          value: https://github.com/mandar33/local-eks-platform.git
+        - name: frontend
+          value: zot.registry.svc.cluster.local:5000/frontend-api
+        - name: crud
+          value: zot.registry.svc.cluster.local:5000/crud-api
+      steps:
+        - uses: git-clone
+          config:
+            repoURL: ${{ vars.gitRepo }}
+            checkout:
+              - branch: main
+                path: ./repo
+        - uses: yaml-update
+          config:
+            path: ./repo/k8s-manifests/apps/staging/frontend-values.yaml
+            updates:
+              - key: image.tag
+                value: ${{ imageFrom(vars.frontend).Tag }}
+        - uses: yaml-update
+          config:
+            path: ./repo/k8s-manifests/apps/staging/crud-values.yaml
+            updates:
+              - key: image.tag
+                value: ${{ imageFrom(vars.crud).Tag }}
+        - uses: git-commit
+          config:
+            path: ./repo
+            message: "staging: frontend-api ${{ imageFrom(vars.frontend).Tag }}, crud-api ${{ imageFrom(vars.crud).Tag }} (promoted by Kargo)"
+        - uses: git-push
+          config:
+            path: ./repo
+        - uses: argocd-update
+          config:
+            apps:
+              - name: frontend-api-staging
+                namespace: argocd
+              - name: crud-api-staging
+                namespace: argocd
+---
+# Region B: only versions staging already has.
 apiVersion: kargo.akuity.io/v1alpha1
 kind: Stage
 metadata:
@@ -113,7 +171,7 @@ spec:
         name: app-images
       sources:
         stages:
-          - dev
+          - staging
   promotionTemplate:
     spec:
       vars:

@@ -5,6 +5,8 @@
 #   scripts/bootstrap-vault.sh           install, init, unseal, configure
 #   scripts/bootstrap-vault.sh unseal    unseal only (Vault seals on every restart)
 #   scripts/bootstrap-vault.sh roles     (re)write the app login roles only
+#   scripts/bootstrap-vault.sh databases a database per environment (dev,
+#                                        staging) + its Vault connection and roles
 #
 # No secret is ever written to this repo:
 # - The Vault unseal key and root token go to $STATE_DIR/vault-init.json
@@ -73,14 +75,96 @@ write_app_roles() {
     token_policies=crud-api \
     token_ttl=1h >/dev/null
 
-  # One role per environment namespace.
+  # One role per environment namespace, reading only that environment's
+  # database. dev keeps the shared-database policy (crud-api) too, so its
+  # current credentials stay renewable while it switches to crud_dev.
   vault_run write auth/kubernetes/role/crud-api-dev \
     bound_service_account_names=crud-api \
     bound_service_account_namespaces=dev \
     audience=vault \
-    token_policies=crud-api \
+    token_policies=crud-api,crud-api-dev \
     token_ttl=1h >/dev/null
-  echo "Vault roles written: crud-api (default), crud-api-cells (cell-*), crud-api-dev (dev)."
+  vault_run write auth/kubernetes/role/crud-api-staging \
+    bound_service_account_names=crud-api \
+    bound_service_account_namespaces=staging \
+    audience=vault \
+    token_policies=crud-api-staging \
+    token_ttl=1h >/dev/null
+  echo "Vault roles written: crud-api (default), crud-api-cells (cell-*), crud-api-dev (dev), crud-api-staging (staging)."
+}
+
+ENVIRONMENTS=(dev staging)
+
+# psql as the postgres superuser over the pod's local socket (trusted inside
+# the container only; from the network, Postgres requires a password).
+psql_admin() { k exec -i -n data postgres-0 -- psql -U postgres -v ON_ERROR_STOP=1 -q "$@"; }
+
+# For each environment: database crud_<env> with the same tables and seed
+# data as crud, a login vault_<env> that Vault uses to create short-lived
+# users there (its password is rotated at once, so only Vault knows it), a
+# Vault DB role crud-api-<env> and a policy that can read only that role.
+setup_env_databases() {
+  local env db admin conn password
+  for env in "${ENVIRONMENTS[@]}"; do
+    db="crud_$env" admin="vault_$env" conn="crud-$env-postgres"
+
+    psql_admin -d postgres >/dev/null <<SQL
+SELECT 'CREATE DATABASE $db' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '$db')\gexec
+SQL
+    psql_admin -d "$db" <<'SQL'
+SET client_min_messages = warning;
+CREATE TABLE IF NOT EXISTS users_v1 (id INT PRIMARY KEY, standard_data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS users_v2 (id INT PRIMARY KEY, experimental_data JSONB NOT NULL);
+INSERT INTO users_v1 VALUES
+  (1, 'Alice (v1 schema)'),
+  (2, 'Bob (v1 schema)')
+ON CONFLICT DO NOTHING;
+INSERT INTO users_v2 VALUES
+  (1, '{"name": "Alice", "schema": "v2", "tier": "gold"}'),
+  (2, '{"name": "Bob", "schema": "v2", "tier": "silver"}')
+ON CONFLICT DO NOTHING;
+SQL
+
+    if ! vault_run read "database/config/$conn" >/dev/null 2>&1; then
+      password="$(random_secret)"
+      psql_admin -d "$db" <<SQL
+DO \$\$ BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '$admin') THEN
+    CREATE ROLE $admin LOGIN CREATEROLE;
+  END IF;
+END \$\$;
+ALTER ROLE $admin PASSWORD '$password';
+GRANT SELECT ON users_v1, users_v2 TO $admin WITH GRANT OPTION;
+SQL
+      printf '{"plugin_name":"postgresql-database-plugin","connection_url":"postgresql://{{username}}:{{password}}@postgres.data.svc.cluster.local:5432/%s?sslmode=disable","username":"%s","password":"%s","allowed_roles":["crud-api-%s"],"password_authentication":"scram-sha-256"}' \
+        "$db" "$admin" "$password" "$env" | vault_cmd write "database/config/$conn" - >/dev/null
+      unset password
+      vault_run write -f "database/rotate-root/$conn" >/dev/null
+      echo "Connected Vault to $db as $admin and rotated its password."
+    fi
+
+    vault_cmd write "database/roles/crud-api-$env" - >/dev/null <<JSON
+{
+  "db_name": "$conn",
+  "creation_statements": [
+    "CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}';",
+    "GRANT SELECT ON users_v1, users_v2 TO \"{{name}}\";"
+  ],
+  "revocation_statements": [
+    "REVOKE SELECT ON users_v1, users_v2 FROM \"{{name}}\";",
+    "DROP ROLE IF EXISTS \"{{name}}\";"
+  ],
+  "default_ttl": "1h",
+  "max_ttl": "24h"
+}
+JSON
+    vault_cmd policy write "crud-api-$env" - >/dev/null <<HCL
+path "database/creds/crud-api-$env" {
+  capabilities = ["read"]
+}
+HCL
+    echo "Database $db ready; Vault issues its users at database/creds/crud-api-$env."
+  done
 }
 
 if [[ "${1:-}" == "unseal" ]]; then
@@ -91,6 +175,14 @@ fi
 if [[ "${1:-}" == "roles" ]]; then
   load_root_token
   require_unsealed
+  write_app_roles
+  exit 0
+fi
+
+if [[ "${1:-}" == "databases" ]]; then
+  load_root_token
+  require_unsealed
+  setup_env_databases
   write_app_roles
   exit 0
 fi
@@ -170,6 +262,8 @@ path "database/creds/crud-api" {
 }
 HCL
 
+log "A database per environment"
+setup_env_databases
 write_app_roles
 
 log "Done"

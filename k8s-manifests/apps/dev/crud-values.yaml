@@ -3,10 +3,15 @@
 image:
   tag: 1.2.8
 
+# dev's own database (created by scripts/bootstrap-vault.sh databases).
+env:
+  DB_NAME: crud_dev
+
 # DB credentials from Vault (role crud-api-dev, bound to namespace dev), and
 # only dev's frontend-api may call this app.
 vaultDbCredentials:
   enabled: true
   role: crud-api-dev
+  path: creds/crud-api-dev
 allowCallersFrom:
   - frontend-api

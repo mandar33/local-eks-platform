@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Promote a release (frontend-api + crud-api, same version) to a Kargo stage.
 #
+#   scripts/promote.sh staging 1.2.8
 #   scripts/promote.sh region-b 1.2.8
 #   scripts/promote.sh cell-a 1.2.8
 #   scripts/promote.sh cell-b 1.2.8
 #
 # Stages go in this order, and Kargo refuses to skip one:
-#   dev -> region-b -> cell-a -> cell-b
+#   dev -> staging -> region-b -> cell-a -> cell-b
 # (CI promotes to dev for you after your approval on GitHub.)
 set -euo pipefail
 # shellcheck source=lib.sh
@@ -15,7 +16,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 NS=local-eks-platform
 STAGE="${1:-}" VERSION="${2:-}"
 if [[ -z "$STAGE" || -z "$VERSION" ]]; then
-  echo "usage: $0 <stage> <version>     stages: dev region-b cell-a cell-b" >&2
+  echo "usage: $0 <stage> <version>     stages: dev staging region-b cell-a cell-b" >&2
   exit 2
 fi
 

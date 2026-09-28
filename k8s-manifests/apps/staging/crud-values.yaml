@@ -1,0 +1,17 @@
+# staging's crud-api, layered on apps/common/crud-values.yaml.
+# Kargo's "staging" Stage updates image.tag.
+image:
+  tag: 1.2.8
+
+# staging's own database (created by scripts/bootstrap-vault.sh databases).
+env:
+  DB_NAME: crud_staging
+
+# DB credentials from Vault (role crud-api-staging, bound to namespace
+# staging), and only staging's frontend-api may call this app.
+vaultDbCredentials:
+  enabled: true
+  role: crud-api-staging
+  path: creds/crud-api-staging
+allowCallersFrom:
+  - frontend-api

@@ -1,0 +1,7 @@
+# staging's frontend-api, layered on apps/common/frontend-values.yaml.
+# Kargo's "staging" Stage updates image.tag.
+image:
+  tag: 1.2.8
+
+env:
+  CRUD_API_URL: http://crud-api-svc.staging.svc.cluster.local
