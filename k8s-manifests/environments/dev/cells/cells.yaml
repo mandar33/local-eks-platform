@@ -6,13 +6,13 @@ kind: Cell
 metadata:
   name: a
 spec:
-  frontendTag: 1.2.6
-  crudTag: 1.2.2
+  frontendTag: 1.2.7
+  crudTag: 1.2.7
 ---
 apiVersion: platform.local/v1alpha1
 kind: Cell
 metadata:
   name: b
 spec:
-  frontendTag: 1.2.6
-  crudTag: 1.2.2
+  frontendTag: 1.2.7
+  crudTag: 1.2.7
