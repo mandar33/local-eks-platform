@@ -5,6 +5,7 @@
 #   scripts/setup-region.sh          everything below, in order
 #   scripts/setup-region.sh argocd   register region-b with region A's Argo CD
 #   scripts/setup-region.sh vault    let region-b's crud-api log in to Vault
+#   scripts/setup-region.sh database region-b's own Postgres, managed by Vault
 #   scripts/setup-region.sh lb       start the global load balancer on localhost:7080
 #
 # KUBECTL talks to region A, KUBECTL_B to region B (see scripts/lib.sh).
@@ -89,13 +90,73 @@ setup_vault() {
     vault_cmd write "auth/kubernetes-$REGION/config" - >/dev/null
   unset reviewer
 
+  write_region_role
+}
+
+# crud-api in the region logs in here and may read only the region's own
+# database (see setup_database).
+write_region_role() {
   vault_run write "auth/kubernetes-$REGION/role/crud-api" \
     bound_service_account_names=crud-api \
     bound_service_account_namespaces=default \
     audience=vault \
-    token_policies=crud-api \
+    token_policies="crud-api-$REGION" \
     token_ttl=1h >/dev/null
-  echo "Vault role kubernetes-$REGION/crud-api issues the same read-only DB users as region A."
+  echo "Vault role kubernetes-$REGION/crud-api issues read-only users for $REGION's own database."
+}
+
+# The region's own Postgres (Argo CD app region-b-postgres) and Vault's
+# connection to it, through NodePort 30432 on the kind Docker network.
+setup_database() {
+  log "Connecting Vault to $REGION's own Postgres"
+  load_root_token
+  require_unsealed
+  local conn="crud-$REGION-postgres" pw
+  kb create namespace data --dry-run=client -o yaml | kb apply -f - >/dev/null
+  if ! kb get secret postgres-admin -n data >/dev/null 2>&1; then
+    kb create secret generic postgres-admin -n data --from-literal=password="$(random_secret)" >/dev/null
+    kb label secret postgres-admin -n data app.kubernetes.io/managed-by=setup-region >/dev/null
+    echo "Created data/postgres-admin in $REGION."
+  fi
+
+  echo "Waiting for postgres-0 in $REGION (deployed by the region-b-postgres Argo CD app)..."
+  for _ in $(seq 1 60); do
+    [[ "$(kb get pod postgres-0 -n data -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)" == "True" ]] && break
+    sleep 5
+  done
+  kb wait pod/postgres-0 -n data --for=condition=Ready --timeout=10s >/dev/null
+
+  if ! vault_run read "database/config/$conn" >/dev/null 2>&1; then
+    pw="$(kb get secret postgres-admin -n data -o jsonpath='{.data.password}' | base64 -d)"
+    printf '{"plugin_name":"postgresql-database-plugin","connection_url":"postgresql://{{username}}:{{password}}@%s-control-plane:30432/crud?sslmode=disable","username":"postgres","password":"%s","allowed_roles":["crud-api-%s"],"password_authentication":"scram-sha-256"}' \
+      "$REGION" "$pw" "$REGION" | vault_cmd write "database/config/$conn" - >/dev/null
+    unset pw
+    vault_run write -f "database/rotate-root/$conn" >/dev/null
+    echo "Connected Vault to $REGION's Postgres and rotated its admin password."
+  fi
+
+  vault_cmd write "database/roles/crud-api-$REGION" - >/dev/null <<JSON
+{
+  "db_name": "$conn",
+  "creation_statements": [
+    "CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}';",
+    "GRANT SELECT ON users_v1, users_v2 TO \"{{name}}\";"
+  ],
+  "default_ttl": "1h",
+  "max_ttl": "24h"
+}
+JSON
+  vault_cmd policy write "crud-api-$REGION" - >/dev/null <<HCL
+path "database/creds/crud-api-$REGION" {
+  capabilities = ["read"]
+}
+HCL
+  write_region_role
+
+  # A Vault token keeps the policies it was issued with; make the operator
+  # in $REGION log in again so it picks up crud-api-$REGION.
+  kb rollout restart deploy/vault-secrets-operator-controller-manager -n vault-secrets-operator-system >/dev/null
+  echo "Vault issues $REGION's DB users at database/creds/crud-api-$REGION."
 }
 
 setup_lb() {
@@ -114,7 +175,8 @@ setup_lb() {
 case "${1:-all}" in
   argocd) setup_argocd ;;
   vault)  setup_vault ;;
+  database) setup_database ;;
   lb)     setup_lb ;;
-  all)    setup_argocd; setup_vault; setup_lb ;;
-  *)      echo "usage: $0 [argocd|vault|lb]" >&2; exit 2 ;;
+  all)    setup_argocd; setup_vault; setup_database; setup_lb ;;
+  *)      echo "usage: $0 [argocd|vault|database|lb]" >&2; exit 2 ;;
 esac

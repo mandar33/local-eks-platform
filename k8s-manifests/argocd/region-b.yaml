@@ -59,6 +59,27 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
+  name: region-b-postgres
+  namespace: argocd
+spec:
+  # Region B's own database. Its admin password comes from
+  # scripts/setup-region.sh database; until then the pod waits for it.
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/platform/region-b/data
+  destination:
+    name: region-b
+    namespace: data
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
   name: region-b-networking
   namespace: argocd
 spec:
