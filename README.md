@@ -4,6 +4,8 @@ A production-shaped Kubernetes platform that runs on a laptop. Two Python APIs s
 
 It's meant for learning how the usual EKS building blocks fit together without a cloud account: service mesh, GitOps, feature flags, autoscaling, canary releases, image promotion, secrets management, cell-based architecture with Crossplane, and a second region with failover.
 
+> **Being restructured (28 Sep 2026).** The platform now has dev, staging and prod cells (`prod-a1`, `prod-a2`, `prod-b1`) released in waves; see [notes/environments-design.md](notes/environments-design.md) for the layout and [notes/roadmap.md](notes/roadmap.md) for progress. Addresses: prod `localhost:8080` / `9080` / `7080`, dev `dev.localhost:8080`, staging `staging.localhost:8080`. Some sections below (cells lab, Crossplane) still describe the old layout until the docs phase.
+
 **No secrets are stored in this repo.** Database users, the registry login and Kargo's GitHub token all live in HashiCorp Vault (see [Secrets](#secrets)).
 
 ## New to this? The pieces in plain words
@@ -300,10 +302,8 @@ done
 # 11. Kargo's GitHub token (fine-grained: this repo only, Contents read/write)
 scripts/set-kargo-git-token.sh
 
-# 12. Crossplane, for cells (the crossplane-dev, cell-a and cell-b apps do the rest)
-helm repo add crossplane-stable https://charts.crossplane.io/stable
-helm upgrade --install crossplane crossplane-stable/crossplane --version 2.4.2 \
-  -n crossplane-system --create-namespace --wait
+# 12. (No Crossplane any more: the prod cells are an Argo CD ApplicationSet,
+#     k8s-manifests/argocd/cells.yaml.)
 
 # 13. CI: runner in Docker, registered with `gh` (must be logged in as the repo owner)
 scripts/setup-ci.sh

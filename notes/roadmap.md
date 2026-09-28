@@ -62,7 +62,7 @@ Four Snyk products, each tried on this repo. Run the scan, read the results, fix
 
 | Item | Status |
 |---|---|
-| dev → staging → prod restructure, profiles `bigtech` (cells, waves) / `small` ([design](environments-design.md)) | 🔜 phases 1–6 done 28 Sep (folders, app of apps, chart extras, dev namespace, staging + a database per env, region B's own Postgres); phase 7 (profile `bigtech`: ApplicationSet cells, waves) next |
+| dev → staging → prod restructure, profiles `bigtech` (cells, waves) / `small` ([design](environments-design.md)) | 🔜 phases 1–7 done 28 Sep (… region B's own Postgres, profile `bigtech`: cells + waves, Crossplane removed); phase 8 (profile `small` + switch) next |
 | Automatic promotion with health checks and bake times (Argo Rollouts analysis) | ⬜ |
 | Real cell router (tenant → cell lookup, verified token) and a database per cell | ⬜ |
 | Istio multi-cluster | ⬜ |
@@ -97,6 +97,7 @@ Four Snyk products, each tried on this repo. Run the scan, read the results, fix
 
 | Date | What | Commit |
 |---|---|---|
+| 28 Sep | Phase 7: prod cells `prod-a1`, `prod-a2` (region A), `prod-b1` (region B) via ApplicationSet, each with its own database; `localhost:8080` = cell router (odd/even users); Kargo waves `staging → prod-a1 → (10 min) → prod-a2 → (10 min) → prod-b1`, later waves automatic; old cells, region B's `default` apps and Crossplane removed with 0 failed requests | `d351277` … `faef6b0` |
 | 28 Sep | Phase 6: region B's own Postgres (`region-b-postgres`, `setup-region.sh database`); Vault reaches it on NodePort 30432; region A's Postgres NodePort removed. No downtime | `c7c539c`, `ee64077` + next |
 | 28 Sep | Phase 5: staging (`staging.localhost:8080`, Kargo `dev → staging → region-b`), databases `crud_dev` / `crud_staging` each with its own Vault connection and role (`bootstrap-vault.sh databases`); ~8 min dev `500` from two operator surprises (findings) | `7adefd4` |
 | 28 Sep | Phase 4: dev apps in namespace `dev` (Vault role `crud-api-dev`, access rule from the chart), `dev.localhost:8080`; ~6 min of 503 from a misplaced DestinationRule (findings) | `2955ae1`, `dd53162` |

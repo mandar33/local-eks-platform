@@ -59,21 +59,10 @@ wait_for_pod_running() {
 
 # Which namespaces' crud-api may log in to Vault for DB credentials.
 write_app_roles() {
-  # Legacy: crud-api in default (region A before the dev namespace existed).
-  vault_run write auth/kubernetes/role/crud-api \
-    bound_service_account_names=crud-api \
-    bound_service_account_namespaces=default \
-    audience=vault \
-    token_policies=crud-api \
-    token_ttl=1h >/dev/null
-
-  # crud-api in every cell namespace (cell-a, cell-b, ...).
-  vault_run write auth/kubernetes/role/crud-api-cells \
-    bound_service_account_names=crud-api \
-    'bound_service_account_namespaces=cell-*' \
-    audience=vault \
-    token_policies=crud-api \
-    token_ttl=1h >/dev/null
+  # Retired login roles: crud-api in default (before the dev namespace) and
+  # crud-api-cells (the Crossplane cells). Nothing may log in with them.
+  vault_run delete auth/kubernetes/role/crud-api >/dev/null
+  vault_run delete auth/kubernetes/role/crud-api-cells >/dev/null
 
   # One role per namespace in ENVIRONMENTS (below), reading only that
   # namespace's database. A policy change reaches the Vault Secrets Operator
@@ -82,7 +71,7 @@ write_app_roles() {
   for env in "${ENVIRONMENTS[@]}"; do
     vault_run write "auth/kubernetes/role/crud-api-$env"       bound_service_account_names=crud-api       bound_service_account_namespaces="$env"       audience=vault       token_policies="crud-api-$env"       token_ttl=1h >/dev/null
   done
-  echo "Vault roles written: crud-api (default), crud-api-cells (cell-*), and crud-api-<ns> for: ${ENVIRONMENTS[*]}."
+  echo "Vault roles written: crud-api-<ns> for: ${ENVIRONMENTS[*]}."
 }
 
 # Region A namespaces with their own database: the environments, then the

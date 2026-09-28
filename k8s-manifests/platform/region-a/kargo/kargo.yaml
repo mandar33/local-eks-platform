@@ -229,7 +229,7 @@ spec:
       sources:
         stages:
           - prod-a1
-        requiredSoakTime: 10m
+        requiredSoakTime: 10m0s   # Kargo stores durations this way; "10m" shows as OutOfSync
   promotionTemplate:
     spec:
       vars:
@@ -287,7 +287,7 @@ spec:
       sources:
         stages:
           - prod-a2
-        requiredSoakTime: 10m
+        requiredSoakTime: 10m0s   # Kargo stores durations this way; "10m" shows as OutOfSync
   promotionTemplate:
     spec:
       vars:
