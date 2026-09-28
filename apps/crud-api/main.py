@@ -26,7 +26,7 @@ async def get_db():
 
 @app.get("/healthz")
 async def healthz():
-    return {"status": "ok"}
+    return {"status": "ok", "note": "second-round"}
 
 @app.get("/api/v1/users/{user_id}")
 async def get_user_v1(user_id: int, db: AsyncSession = Depends(get_db)):
