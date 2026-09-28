@@ -218,6 +218,7 @@ Argo CD Applications in `k8s-manifests/argocd/region-a.yaml` (paths below are un
 
 | Application | Source | Deploys |
 |---|---|---|
+| `root` | `argocd/` | Every Application in this table (app of apps; the only one applied by hand) |
 | `frontend-api-dev` | `charts/base-api` + `apps/common/` and `apps/dev/frontend-values.yaml` | frontend Deployment, Service, HPA, ServiceAccount |
 | `crud-api-dev` | `charts/base-api` + `apps/common/` and `apps/dev/crud-values.yaml` | crud Deployment, Service, HPA, ServiceAccount |
 | `platform-networking-dev` | `platform/region-a/networking/` | Gateway, VirtualService, AuthorizationPolicy |
@@ -274,8 +275,10 @@ helm upgrade --install kargo oci://ghcr.io/akuity/kargo-charts/kargo --version 1
   --set api.adminAccount.tokenSigningKey="$(openssl rand -base64 48)" --wait
 unset HASH
 
-# 7. Hand the rest to Argo CD. Some apps wait for steps 8-10; that's expected.
-kubectl apply -n argocd -f k8s-manifests/argocd/region-a.yaml
+# 7. Hand the rest to Argo CD: the root app syncs every Application in
+#    k8s-manifests/argocd/. Some apps wait for steps 8-10, and region B's until
+#    region B is registered; that's expected.
+kubectl apply -n argocd -f k8s-manifests/argocd/root.yaml
 
 # 8. Vault: installs Vault + the operator, creates the Postgres admin password,
 #    connects Vault to Postgres and rotates that password.
@@ -293,7 +296,7 @@ done
 # 11. Kargo's GitHub token (fine-grained: this repo only, Contents read/write)
 scripts/set-kargo-git-token.sh
 
-# 12. Crossplane, for cells (the crossplane-dev and cells-dev apps do the rest)
+# 12. Crossplane, for cells (the crossplane-dev, cell-a and cell-b apps do the rest)
 helm repo add crossplane-stable https://charts.crossplane.io/stable
 helm upgrade --install crossplane crossplane-stable/crossplane --version 2.4.2 \
   -n crossplane-system --create-namespace --wait
@@ -326,7 +329,8 @@ CLUSTER=region-b REGISTRY_HOST=dev-cluster-control-plane scripts/setup-registry.
 
 # Register region B with Argo CD and Vault, start global-lb on localhost:7080
 scripts/setup-region.sh
-kubectl apply -n argocd -f k8s-manifests/argocd/region-b.yaml
+# Region B's apps (argocd/region-b.yaml) already exist via the root app and
+# sync on their own now that the cluster is registered.
 ```
 
 </details>

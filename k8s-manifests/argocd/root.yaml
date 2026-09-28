@@ -1,0 +1,30 @@
+# App of apps. Apply this once by hand:
+#   kubectl apply -n argocd -f k8s-manifests/argocd/root.yaml
+# From then on Argo CD syncs every file in k8s-manifests/argocd/ (this one
+# too), so adding, changing or removing an Application is a Git commit.
+#
+# Only Applications defined in this folder belong to root. The ones Crossplane
+# creates for cells (cell-a-crud-api, ...) aren't tracked, so root leaves them
+# alone.
+#
+# Removing an Application from Git deletes the Application but leaves what it
+# deployed running (no resources finalizer). Delete those by hand, or add the
+# finalizer to an app first if you want them removed with it.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/argocd
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
