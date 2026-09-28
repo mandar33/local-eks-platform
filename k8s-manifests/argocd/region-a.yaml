@@ -1,0 +1,342 @@
+# kubectl apply -n argocd -f k8s-manifests/argocd/region-a.yaml
+# The API apps render charts/base-api with their own values file;
+# platform-networking-dev syncs networking/ (Istio), postgres-dev syncs data/,
+# vault-secrets-dev syncs secrets/ (Vault Secrets Operator resources),
+# registry-dev syncs registry/ (Zot), kargo-dev syncs kargo/ (promotions),
+# frontend-api-canary-dev runs the frontend canary (frontend-canary-values.yaml),
+# crossplane-dev defines the Cell API; cell-a and cell-b create one cell each,
+# flipt-dev runs Flipt from its official chart with flipt-values.yaml.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: frontend-api-dev
+  namespace: argocd
+  annotations:
+    # Lets Kargo's "dev" Stage trigger syncs of this app (see kargo/).
+    kargo.akuity.io/authorized-stage: local-eks-platform:dev
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/charts/base-api
+    helm:
+      releaseName: frontend-api
+      valueFiles:
+        - ../../apps/common/frontend-values.yaml
+        - ../../apps/dev/frontend-values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: crud-api-dev
+  namespace: argocd
+  annotations:
+    # Lets Kargo's "dev" Stage trigger syncs of this app (see kargo/).
+    kargo.akuity.io/authorized-stage: local-eks-platform:dev
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/charts/base-api
+    helm:
+      releaseName: crud-api
+      valueFiles:
+        - ../../apps/common/crud-values.yaml
+        - ../../apps/dev/crud-values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-networking-dev
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/platform/region-a/networking
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: postgres-dev
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/platform/region-a/data
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: data
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: vault-secrets-dev
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/platform/region-a/secrets
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    # The VSO CRDs appear only after scripts/bootstrap-vault.sh runs.
+    retry:
+      limit: 20
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: registry-dev
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/platform/region-a/registry
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: registry
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    # Needs cert-manager and the Vault Secrets Operator CRDs.
+    retry:
+      limit: 20
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kargo-dev
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/platform/region-a/kargo
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: local-eks-platform
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    # The Project creates the namespace, so later resources may need a retry.
+    retry:
+      limit: 20
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: frontend-api-canary-dev
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/charts/base-api
+    helm:
+      releaseName: frontend-api-canary
+      # Same values as stable, then the canary overrides on top.
+      valueFiles:
+        - ../../apps/common/frontend-values.yaml
+        - ../../apps/dev/frontend-values.yaml
+        - ../../apps/dev/frontend-canary-values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      # With canary.enabled: false the release is empty; let Argo CD remove it.
+      allowEmpty: true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: crossplane-dev
+  namespace: argocd
+spec:
+  # The Cell API: Crossplane functions, RBAC, XRD and Composition.
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/platform/region-a/crossplane
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: crossplane-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 20
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cell-a
+  namespace: argocd
+  annotations:
+    # Lets Kargo's "cell-a" Stage trigger syncs of this app.
+    kargo.akuity.io/authorized-stage: local-eks-platform:cell-a
+spec:
+  # Cell a (cells/cell-a.yaml). Needs crossplane-dev first, hence the retry.
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/platform/region-a/cells
+    directory:
+      include: cell-a.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: crossplane-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 20
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cell-b
+  namespace: argocd
+  annotations:
+    # Lets Kargo's "cell-b" Stage trigger syncs of this app.
+    kargo.akuity.io/authorized-stage: local-eks-platform:cell-b
+spec:
+  # Cell b (cells/cell-b.yaml). Needs crossplane-dev first, hence the retry.
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/platform/region-a/cells
+    directory:
+      include: cell-b.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: crossplane-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 20
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cross-region-dev
+  namespace: argocd
+spec:
+  # NodePorts for Vault and Postgres that region B connects to.
+  project: default
+  source:
+    repoURL: https://github.com/mandar33/local-eks-platform.git
+    targetRevision: main
+    path: k8s-manifests/platform/region-a/regions
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: flipt-dev
+  namespace: argocd
+spec:
+  # Flipt (feature flags). Was a manual helm install; now managed from Git.
+  project: default
+  sources:
+    # Flipt's official chart, pinned...
+    - repoURL: https://helm.flipt.io
+      chart: flipt
+      targetRevision: 0.87.9
+      helm:
+        releaseName: flipt
+        valueFiles:
+          - $values/k8s-manifests/platform/region-a/flipt-values.yaml
+    # ...with its values from this repo ("$values" above points here).
+    - repoURL: https://github.com/mandar33/local-eks-platform.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

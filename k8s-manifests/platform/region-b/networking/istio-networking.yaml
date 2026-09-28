@@ -1,0 +1,49 @@
+# Region B's front door (localhost:9080). Every response says x-region: b.
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: platform-gateway
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - "*"
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: frontend-routing
+spec:
+  gateways:
+  - platform-gateway
+  hosts:
+  - "*"
+  http:
+  - route:
+    - destination:
+        host: frontend-api-svc.default.svc.cluster.local
+        port:
+          number: 80
+    headers:
+      response:
+        set:
+          x-region: b
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-frontend-to-crud
+spec:
+  selector:
+    matchLabels:
+      app: crud-api
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        principals: ["cluster.local/ns/default/sa/frontend-api"]

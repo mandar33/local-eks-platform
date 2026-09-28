@@ -1,0 +1,10 @@
+# Layered on apps/common/crud-values.yaml. Region B has no database of its
+# own: it reads region A's Postgres through a NodePort on the kind network.
+env:
+  DB_HOST: dev-cluster-control-plane
+  DB_PORT: "30432"
+
+# Region B's own crud-api version. Kargo's "region-b" Stage updates it, so
+# crud-api reaches region B only after dev, like the frontend.
+image:
+  tag: 1.2.8

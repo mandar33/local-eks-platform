@@ -6,7 +6,7 @@ image:
 # stable: the normal release (Deployment, Service, HPA, ServiceAccount).
 # canary: an extra Deployment named <nameOverride>-canary that shares the
 #         stable release's Service and ServiceAccount. Istio decides how much
-#         traffic it gets (see environments/dev/networking/).
+#         traffic it gets (see platform/region-a/networking/).
 track: stable
 canary:
   enabled: true

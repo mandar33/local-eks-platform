@@ -1,0 +1,14 @@
+# Shared by every copy of frontend-api (dev, region B, cells). Each copy
+# layers its own file from apps/<copy>/ on top, with at least image.tag.
+nameOverride: frontend-api
+
+image:
+  repository: localhost:5001/frontend-api
+
+env:
+  CRUD_API_URL: http://crud-api-svc.default.svc.cluster.local
+  FLIPT_URL: http://flipt.default.svc.cluster.local:8080
+
+autoscaling:
+  minReplicas: 1
+  maxReplicas: 3

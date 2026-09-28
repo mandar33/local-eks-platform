@@ -1,0 +1,4 @@
+# dev's frontend-api, layered on apps/common/frontend-values.yaml.
+# Kargo's "dev" Stage updates image.tag.
+image:
+  tag: 1.2.8
