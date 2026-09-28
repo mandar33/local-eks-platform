@@ -20,6 +20,12 @@ NAMESPACE="${FLIPT_NAMESPACE:-dev}"
 URL="http://flipt.default.svc.cluster.local:8080/evaluate/v1/boolean"
 
 ensure_pod() {
+  # A pod left over from before a cluster restart can be stuck (Unknown); replace it.
+  local phase
+  phase="$(k get pod flag-check -n default -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+  if [[ -n "$phase" && "$phase" != Running ]]; then
+    k delete pod flag-check -n default --force --grace-period=0 >/dev/null 2>&1 || true
+  fi
   if ! k get pod flag-check -n default >/dev/null 2>&1; then
     k run flag-check -n default --image=curlimages/curl --restart=Never --command -- sleep 86400 >/dev/null
   fi

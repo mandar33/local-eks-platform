@@ -62,7 +62,7 @@ Four Snyk products, each tried on this repo. Run the scan, read the results, fix
 
 | Item | Status |
 |---|---|
-| dev → staging → prod restructure, profiles `bigtech` (cells, waves) / `small` ([design](environments-design.md)) | 🔜 phases 1–8 done 28 Sep (… profile `bigtech`: cells + waves, profile `small`, `scripts/profile.sh`); phase 9 (guardrails) next |
+| dev → staging → prod restructure, profiles `bigtech` (cells, waves) / `small` ([design](environments-design.md)) | 🔜 phases 1–9 done 28 Sep (… profiles `bigtech` / `small`, guardrails); phase 10 (docs) next |
 | Automatic promotion with health checks and bake times (Argo Rollouts analysis) | ⬜ |
 | Real cell router (tenant → cell lookup, verified token) and a database per cell | ⬜ |
 | Istio multi-cluster | ⬜ |
@@ -97,6 +97,7 @@ Four Snyk products, each tried on this repo. Run the scan, read the results, fix
 
 | Date | What | Commit |
 |---|---|---|
+| 28 Sep | Phase 9: Argo CD projects `nonprod` / `prod` (tested: a nonprod app aimed at `prod-a1` is refused); staging auto-promotes once dev verifies (untested until the next release, Round 3); Flipt namespaces `dev` / `staging` / `prod`, `FLIPT_NAMESPACE` per frontend, `flag.sh` per namespace. 0 failed of 90 requests | `cd8c972`, `ed042c1` + next |
 | 28 Sep | Phase 8: profiles `bigtech` / `small` (`k8s-manifests/profiles/`), switched by `scripts/profile.sh` (one Git line + global-lb config). Tested both ways: prod back in ~20 s (small) and ~13 s (bigtech), 1 failed check on `:9080` during the first switch. Memory: small ≈ 8.3 GB, bigtech ≈ 8.7 GB | `ed514ec` … `f373fa7` |
 | 28 Sep | Phase 7 waves proven: `prod-a2` promoted itself 13 min after `prod-a1`, `prod-b1` 11 min later; 315 requests, 0 failed | – |
 | 28 Sep | Phase 7: prod cells `prod-a1`, `prod-a2` (region A), `prod-b1` (region B) via ApplicationSet, each with its own database; `localhost:8080` = cell router (odd/even users); Kargo waves `staging → prod-a1 → (10 min) → prod-a2 → (10 min) → prod-b1`, later waves automatic; old cells, region B's `default` apps and Crossplane removed with 0 failed requests | `d351277` … `faef6b0` |

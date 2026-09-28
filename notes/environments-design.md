@@ -163,7 +163,7 @@ Each phase is one or two commits, and the apps keep serving. Every phase ends wi
 | 6 | **Region B gets its own Postgres** ✅ | Remove the NodePort to region A's database |
 | 7 | **Profile `bigtech`** ✅ | ApplicationSet cells `prod-a1`, `prod-a2`, `prod-b1`; cell routers; Kargo waves with bake time; global-lb across regions. Remove Crossplane and old cells, `region-b` stage |
 | 8 | **Profile `small`** ✅ | `prod` with 2 replicas + canary on region B; `scripts/profile.sh`; test the switch both ways |
-| 9 | **Guardrails** | AppProjects; auto-promotion for dev and staging; flags per env |
+| 9 | **Guardrails** ✅ | AppProjects; auto-promotion for dev and staging; flags per env |
 | 10 | **Docs** | README, guide, exercises, roadmap (absorbs the pending "update the guide for Kargo" item) |
 
 ## Exercises this changes
