@@ -1,0 +1,16 @@
+# Cell prod-b1 (region B, bigtech profile), layered on apps/common/crud-values.yaml.
+# Kargo's "prod-b1" Stage updates image.tag.
+image:
+  tag: 1.2.8
+
+# Region B's own Postgres (postgres.data in the region-b cluster, database
+# crud: the common default). Users come from region A's Vault, which region B
+# reaches on NodePort 30820, through region B's own auth mount.
+vaultDbCredentials:
+  enabled: true
+  address: http://dev-cluster-control-plane:30820
+  authMount: kubernetes-region-b
+  role: crud-api
+  path: creds/crud-api-region-b
+allowCallersFrom:
+  - frontend-api

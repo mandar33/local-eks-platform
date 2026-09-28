@@ -1,0 +1,7 @@
+# Cell prod-a1 (region A, bigtech profile), layered on apps/common/frontend-values.yaml.
+# Kargo's "prod-a1" Stage updates image.tag.
+image:
+  tag: 1.2.8
+
+env:
+  CRUD_API_URL: http://crud-api-svc.prod-a1.svc.cluster.local

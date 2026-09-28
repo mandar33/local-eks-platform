@@ -1,0 +1,71 @@
+# Prod cells (bigtech profile). Each cell is a complete copy of the app stack
+# serving a slice of users, in its own namespace with its own database.
+#
+# The ApplicationSet creates two Argo CD apps per cell, frontend-api-<cell>
+# and crud-api-<cell>, from the base-api chart with
+#   apps/common/<app>-values.yaml, then apps/prod/<cell>/<app>-values.yaml
+# (image tags from Kargo, DB name, Vault role). Argo CD deploys each to the
+# cell's cluster, so cells can live in either region.
+#
+# Add a cell: one element below, apps/prod/<cell>/ values, its namespace
+# (platform/<region>/networking/namespaces.yaml), its database and Vault role
+# (scripts/bootstrap-vault.sh ENVIRONMENTS), a Kargo stage and a route.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: prod-cells
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - matrix:
+        generators:
+          - list:
+              elements:
+                - cell: prod-a1
+                  cluster: in-cluster
+                - cell: prod-a2
+                  cluster: in-cluster
+                - cell: prod-b1
+                  cluster: region-b
+          - list:
+              elements:
+                - app: frontend-api
+                  values: frontend
+                - app: crud-api
+                  values: crud
+  template:
+    metadata:
+      name: "{{ .app }}-{{ .cell }}"
+      annotations:
+        # Lets the cell's Kargo Stage trigger syncs of these apps (see kargo/).
+        kargo.akuity.io/authorized-stage: "local-eks-platform:{{ .cell }}"
+      # Removing a cell removes what it deployed.
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/mandar33/local-eks-platform.git
+        targetRevision: main
+        path: k8s-manifests/charts/base-api
+        helm:
+          releaseName: "{{ .app }}"
+          valueFiles:
+            - "../../apps/common/{{ .values }}-values.yaml"
+            - "../../apps/prod/{{ .cell }}/{{ .values }}-values.yaml"
+      destination:
+        name: "{{ .cluster }}"
+        namespace: "{{ .cell }}"
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        # The namespace comes from the region's networking app; retry until it exists.
+        retry:
+          limit: 20
+          backoff:
+            duration: 15s
+            factor: 2
+            maxDuration: 5m

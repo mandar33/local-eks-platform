@@ -1,0 +1,8 @@
+# Cell prod-b1 (region B, bigtech profile), layered on apps/common/frontend-values.yaml.
+# Kargo's "prod-b1" Stage updates image.tag. Flipt is region B's own
+# (flipt.default in the region-b cluster, the common default).
+image:
+  tag: 1.2.8
+
+env:
+  CRUD_API_URL: http://crud-api-svc.prod-b1.svc.cluster.local

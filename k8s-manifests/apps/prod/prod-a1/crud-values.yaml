@@ -1,0 +1,15 @@
+# Cell prod-a1 (region A, bigtech profile), layered on apps/common/crud-values.yaml.
+# Kargo's "prod-a1" Stage updates image.tag.
+image:
+  tag: 1.2.8
+
+# The cell's own database (scripts/bootstrap-vault.sh databases).
+env:
+  DB_NAME: crud_prod_a1
+
+vaultDbCredentials:
+  enabled: true
+  role: crud-api-prod-a1
+  path: creds/crud-api-prod-a1
+allowCallersFrom:
+  - frontend-api
