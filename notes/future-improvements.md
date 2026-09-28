@@ -14,6 +14,7 @@ A list to pick from, roughly in order of value. Nothing here is broken today; th
 - **Automatic rollback:** Argo Rollouts is installed but unused. An analysis step (error rate from Istio metrics) could stop and roll back a bad canary on its own.
 - **Data per cell and per region:** cells share one Postgres, and region B reads region A's. A database problem hits everything. Each cell (and region) should have its own data, with replication between regions.
 - **Istio multi-cluster:** failover is per region (global load balancer). Connecting the meshes would let single services fail over.
+- **Check that each DB Secret still works.** The Vault Secrets Operator has twice ended up with a Secret whose DB user no longer exists (after restarts). A small periodic job could log in with each `crud-db` Secret and delete it when login fails, so the operator re-fetches before the next pod needs it. Also worth trying: a newer operator version, and whether it happens without restarts.
 - **Vault Secrets Operator renewal:** after a restart it renewed a lease only one minute before expiry. Consider a shorter `renewalPercent`, alerts on lease age, or a longer DB TTL.
 
 ## Security
