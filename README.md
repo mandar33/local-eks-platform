@@ -2,9 +2,22 @@
 
 A production-shaped Kubernetes platform that runs on a laptop. Two Python APIs sit behind an Istio ingress gateway. A feature flag in Flipt decides which database schema the frontend reads. Images live in a private Zot registry, Kargo promotes new versions, and Argo CD deploys everything from this Git repo.
 
-It's meant for learning how the usual EKS building blocks fit together without a cloud account: service mesh, GitOps, feature flags, autoscaling, canary releases, image promotion, secrets management, cell-based architecture with Crossplane, and a second region with failover.
+It's meant for learning how the usual EKS building blocks fit together without a cloud account: service mesh, GitOps, feature flags, autoscaling, canary releases, image promotion, secrets management, dev/staging/prod environments, cell-based architecture, and a second region with failover.
 
-> **Being restructured (28 Sep 2026).** The platform now has dev, staging and prod cells (`prod-a1`, `prod-a2`, `prod-b1`) released in waves; see [notes/environments-design.md](notes/environments-design.md) for the layout and [notes/roadmap.md](notes/roadmap.md) for progress. Addresses: prod `localhost:8080` / `9080` / `7080`, dev `dev.localhost:8080`, staging `staging.localhost:8080`. Some sections below (cells lab, Crossplane) still describe the old layout until the docs phase.
+Releases go **dev → staging → prod**. Prod comes in two shapes, switched with one command ([Profiles](#profiles-bigtech-or-small)):
+
+- **`bigtech`** (default): prod is three **cells** (`prod-a1`, `prod-a2` in region A, `prod-b1` in region B), each with its own database, and a release reaches them in **waves** with a 10-minute bake between.
+- **`small`**: prod is one copy in region B with 2 replicas and a canary, the way most companies with a few teams run it.
+
+| Address | What answers |
+|---|---|
+| `localhost:8080` | Prod, region A (bigtech: cell router, odd users → `prod-a1`, even → `prod-a2`) |
+| `localhost:9080` | Prod, region B (`prod-b1`, or `prod` in the small profile) |
+| `localhost:7080` | Global load balancer across both regions' prod, with failover |
+| `dev.localhost:8080` | dev |
+| `staging.localhost:8080` | staging |
+
+The design and its reasons are in [notes/environments-design.md](notes/environments-design.md); where things stand is in [notes/roadmap.md](notes/roadmap.md).
 
 **No secrets are stored in this repo.** Database users, the registry login and Kargo's GitHub token all live in HashiCorp Vault (see [Secrets](#secrets)).
 
@@ -20,9 +33,10 @@ It's meant for learning how the usual EKS building blocks fit together without a
 | **Argo CD** | A thermostat set by Git: it keeps comparing the cluster with Git, and fixes any difference. | Deploys everything in `k8s-manifests/`; undoes manual changes. |
 | **Zot** | A private warehouse for app images; a tag like `1.1.2` is the label on a box. | Stores the app images at `localhost:5001` and scans them for known vulnerabilities. |
 | **GitHub Actions (CI)** | A factory line that starts on every code push: builds, inspects, stores, then waits for your approval. | Builds and scans both images on a runner on your laptop, pushes them to Zot, asks Kargo to promote. |
-| **Kargo** | A release manager: notices new images and, when you approve, moves a version environment by environment, writing each move into Git. | Promotes `frontend-api` to `dev`, then to `region-b`. |
-| **Vault** | A safe that hands out short-lived keys instead of shared passwords. | Creates a temporary database user for each crud-api. |
-| **Crossplane** | Lets you define your own "order form" (here a `Cell`) that expands into many resources. | One `Cell` becomes a namespace, two apps, credentials and access rules. |
+| **Kargo** | A release manager: notices new images and moves a version environment by environment, writing each move into Git. | Promotes both apps together: dev (after your approval), staging (by itself), then prod (you start it; later waves follow). |
+| **Vault** | A safe that hands out short-lived keys instead of shared passwords. | Creates a temporary database user for each crud-api, in that environment's own database only. |
+| **ApplicationSet** | A stamp: one template plus a list, and Argo CD makes one app per list entry. | One line per prod cell becomes that cell's two apps, in whichever region the line names. |
+| **Cell** | A complete, isolated copy of the app stack serving a slice of users. If one breaks, only its users notice. | `prod-a1`, `prod-a2`, `prod-b1`: each has its own namespace, database and Vault role. |
 
 Kubernetes is new to you? Start with **Setup** below, then work through [How to test each component](#how-to-test-each-component) from the top. Each section builds on the one before.
 
@@ -30,23 +44,25 @@ Kubernetes is new to you? Start with **Setup** below, then work through [How to 
 
 ### Request flow
 
-A call to `http://localhost:8080/users/1` takes this path:
+A call to `http://localhost:8080/users/1` (prod, bigtech profile) takes this path:
 
 ```mermaid
 flowchart LR
     user([Laptop<br/>localhost:8080]) -->|kind port map<br/>8080 → 30080| gw
 
-    subgraph cluster["kind cluster: dev-cluster"]
+    subgraph cluster["kind cluster: dev-cluster (region A)"]
         subgraph istio[istio-system]
-            gw[istio-ingressgateway<br/>Gateway + VirtualService]
+            gw[istio-ingressgateway<br/>prod-router VirtualService]
         end
-        subgraph nsdefault["namespace: default · sidecar injection on"]
+        subgraph nscell["namespace: prod-a1 · sidecar injection on"]
             fe[frontend-api<br/>FastAPI + Envoy sidecar]
-            flipt[flipt<br/>feature flags]
             crud[crud-api<br/>FastAPI + Envoy sidecar]
         end
+        subgraph nsdefault["namespace: default"]
+            flipt[flipt<br/>feature flags]
+        end
         subgraph nsdata["namespace: data · no sidecar"]
-            pg[(postgres<br/>users_v1 / users_v2)]
+            pg[(postgres<br/>database crud_prod_a1)]
         end
         subgraph nsvault["namespaces: vault, vault-secrets-operator-system"]
             vault[Vault<br/>database secrets engine]
@@ -54,20 +70,22 @@ flowchart LR
         end
     end
 
-    gw -->|mTLS| fe
-    fe -->|"step 1: is enable-new-schema on?"| flipt
+    gw -->|"odd user → prod-a1 (mTLS)"| fe
+    fe -->|"step 1: enable-new-schema on?<br/>(Flipt namespace prod)"| flipt
     fe -->|"step 2: mTLS, only sa/frontend-api allowed"| crud
     crud -->|"v1 → users_v1<br/>v2 → users_v2"| pg
     vault -.->|creates short-lived DB users| pg
-    vso -.->|"logs in as sa/crud-api,<br/>reads database/creds/crud-api"| vault
+    vso -.->|"logs in as sa/crud-api (role crud-api-prod-a1),<br/>reads database/creds/crud-api-prod-a1"| vault
     vso -.->|"crud-db Secret +<br/>restart on rotation"| crud
 ```
 
 1. kind forwards `localhost:8080` to NodePort 30080 on the control-plane node, where the Istio ingress gateway listens.
-2. The gateway's `VirtualService` sends every path to `frontend-api-svc`.
-3. The frontend asks Flipt whether `enable-new-schema` is on for this user.
-4. It calls `crud-api` at `/api/v2/...` if the flag is on, or `/api/v1/...` if it's off. The two sidecars encrypt this call with mutual TLS. An `AuthorizationPolicy` only lets the frontend's ServiceAccount through.
-5. `crud-api` reads `users_v1` or `users_v2` from Postgres, logging in as a short-lived, read-only user that Vault created for it (dotted lines).
+2. The `prod-router` VirtualService picks a cell from the user ID: odd → `prod-a1`, even → `prod-a2`. The header `x-cell: prod-a2` pins a request to a cell. Responses carry `x-cell` and `x-region`.
+3. The frontend asks Flipt whether `enable-new-schema` is on for this user, in its environment's flag namespace (`prod`).
+4. It calls its own cell's `crud-api` at `/api/v2/...` if the flag is on, or `/api/v1/...` if it's off. The two sidecars encrypt this call with mutual TLS. An `AuthorizationPolicy` only lets the same cell's frontend through.
+5. `crud-api` reads `users_v1` or `users_v2` from its cell's own database, logging in as a short-lived, read-only user that Vault created for it (dotted lines).
+
+dev (`dev.localhost:8080`) and staging (`staging.localhost:8080`) work the same way in their own namespaces, databases (`crud_dev`, `crud_staging`) and flag namespaces.
 
 ### Delivery flow
 
@@ -81,11 +99,14 @@ flowchart LR
     zot -->|"scan: fail on high/critical"| runner
     runner -->|"waits for your Approve<br/>(environment dev)"| stage[Kargo Stage dev]
     zot -->|new SemVer tag| wh[Kargo Warehouse] -->|Freight| stage
-    stage -->|"commit image.tag"| gh
+    stage -->|verified| stg[staging<br/>automatic]
+    stg -->|"you promote"| a1[prod-a1]
+    a1 -->|"10 min bake"| a2[prod-a2] -->|"10 min bake"| b1[prod-b1]
+    stage -->|"commit image.tag<br/>(each stage)"| gh
     gh -->|chart + values| argo[Argo CD]
     argo -->|apply| k8s[Cluster]
     zot -->|"nodes pull images"| k8s
-    gh -->|"features.yaml, every 30s"| flipt[Flipt]
+    gh -->|"feature-flags/, every 30s"| flipt[Flipt]
 ```
 
 1. You push a change under `apps/`. GitHub starts `.github/workflows/build.yml` on the self-hosted runner in Docker on your laptop.
@@ -93,53 +114,55 @@ flowchart LR
 3. Zot scans them. Any high or critical vulnerability fails the run.
 4. The run waits in the `dev` environment until you click **Approve** on GitHub.
 5. The runner asks Kargo to promote the new version (Freight) to the `dev` Stage.
-6. Kargo sets `image.tag` in `frontend-values.yaml`, commits as "Kargo", pushes, and asks Argo CD to sync.
-7. Argo CD renders the Helm chart and rolls out the Deployment; the kind nodes pull the image from Zot.
-8. Later, you promote the same version to `region-b` (Kargo refuses until `dev` has it).
+6. Kargo sets `image.tag` in `apps/dev/frontend-values.yaml` and `crud-values.yaml`, commits as "Kargo", pushes, and asks Argo CD to sync.
+7. Argo CD renders the Helm chart and rolls out the Deployments; the kind nodes pull the images from Zot.
+8. Once dev has verified the release, Kargo promotes it to **staging** by itself.
+9. When staging looks good, you promote it to prod: `scripts/promote.sh prod-a1 1.2.N` (bigtech) or `scripts/promote.sh prod 1.2.N` (small). In bigtech, `prod-a2` and then `prod-b1` follow automatically, each after the release has run 10 minutes in the wave before. Kargo refuses to skip a stage.
 
 Git stays the record of what runs where: every promotion is a commit you can read, revert or audit.
 
-### Regions and cells
+### Environments, regions and cells
+
+The bigtech profile (what runs by default):
 
 ```mermaid
 flowchart TB
     user([Laptop]) -->|localhost:7080| lb[global-lb<br/>nginx container]
-    user -->|"localhost:8080, dev.localhost"| gwa
-    user -->|staging.localhost:8080| gwa
-    user -->|cells.localhost:8080| gwa
+    user -->|"localhost:8080"| gwa
+    user -->|"dev.localhost / staging.localhost :8080"| gwa
     user -->|localhost:9080| gwb
 
     subgraph A["Region A · kind cluster dev-cluster"]
         gwa[Istio gateway]
-        gwa -->|"90/10 weights"| def["dev namespace<br/>frontend stable + canary, crud"]
-        gwa --> stg["staging namespace<br/>frontend + crud"]
-        gwa -->|"odd user IDs"| ca["cell-a<br/>frontend + crud"]
-        gwa -->|"even user IDs"| cb["cell-b<br/>frontend + crud"]
-        pg[(Postgres<br/>crud_dev, crud_staging,<br/>crud for cells)]
+        gwa --> dev["dev<br/>frontend (+ canary), crud"]
+        gwa --> stg["staging<br/>frontend, crud"]
+        gwa -->|"odd user IDs"| a1["prod-a1 (cell)<br/>frontend, crud"]
+        gwa -->|"even user IDs"| a2["prod-a2 (cell)<br/>frontend, crud"]
+        pg[("Postgres<br/>crud_dev, crud_staging,<br/>crud_prod_a1, crud_prod_a2")]
         vault[Vault]
-        argo[Argo CD]
-        xp[Crossplane]
-        xp -. creates .-> ca
-        xp -. creates .-> cb
+        argo[Argo CD + Kargo]
     end
 
     subgraph B["Region B · kind cluster region-b"]
-        gwb[Istio gateway] --> defb["default namespace<br/>frontend + crud"]
-        pgb[(Postgres)]
-        defb --> pgb
+        gwb[Istio gateway] --> b1["prod-b1 (cell)<br/>frontend, crud"]
+        pgb[(Postgres<br/>crud)]
+        b1 --> pgb
     end
 
     lb -->|round robin + failover| gwa
     lb --> gwb
     vault -. "manages users<br/>NodePort 30432" .-> pgb
-    defb -. "DB users via auth mount<br/>kubernetes-region-b" .-> vault
-    argo -. deploys .-> defb
+    b1 -. "DB users via auth mount<br/>kubernetes-region-b" .-> vault
+    argo -. deploys .-> b1
 ```
 
-- **Region A** (`dev-cluster`) runs dev and staging (each in its own namespace with its own database) and the shared services: Postgres, Vault, Zot, Argo CD, Kargo and Crossplane.
-- **Region B** (`region-b`) runs its own gateway, frontend, crud-api and Flipt. It has its own Postgres; region A's Vault creates its DB users there (through NodePort 30432 on region B). Argo CD in region A deploys it.
-- **Cells** are complete copies of the app stack inside region A, each serving a slice of users. A `Cell` resource (Crossplane) creates one.
+- **Region A** (`dev-cluster`) runs dev, staging and two prod cells, each in its own namespace with its own database, plus the shared services: Postgres, Vault, Zot, Argo CD, Kargo and Flipt.
+- **Region B** (`region-b`) runs its own gateway, Flipt, Postgres and one prod cell. Region A's Vault creates its DB users there (through NodePort 30432 on region B). Argo CD in region A deploys it.
+- **Cells** are complete copies of the app stack, each serving a slice of users. An Argo CD ApplicationSet (`k8s-manifests/profiles/bigtech/apps.yaml`) creates two apps per cell, in whichever region the cell lives.
 - **global-lb** spreads requests across both regions and retries in the other region if one fails, like Route 53 failover routing would.
+- **Small profile:** region A keeps dev and staging only; region B runs one prod (`prod` namespace, 2 replicas, a canary); `localhost:8080` has no prod and `localhost:7080` points at region B only.
+
+A laptop compromise: dev, staging and prod share clusters here. A real company would give prod its own account and cluster; [notes/environments-design.md](notes/environments-design.md) lists every such shortcut.
 
 ## Components
 
@@ -148,17 +171,16 @@ flowchart TB
 | [kind](https://kind.sigs.k8s.io/) | v0.33.0 (Kubernetes v1.34.11) | – | Runs the cluster as Docker containers: 1 control-plane, 2 workers. |
 | [Istio](https://istio.io/) | 1.31.1 | `istio-system` | Ingress gateway, sidecar proxies, mesh-wide STRICT mTLS and authorization policies. |
 | [Argo CD](https://argo-cd.readthedocs.io/) | v3.5.3 | `argocd` | Keeps the cluster in sync with this repo, with automatic sync, prune and self-heal. |
-| [Flipt](https://www.flipt.io/) | v1.61.1 (chart 0.87.9) | `default` | Evaluates feature flags. Reads `feature-flags/` from GitHub (read-only, git storage). Deployed by Argo CD (`flipt-dev`, `region-b-flipt`) from its official chart with `flipt-values.yaml`. |
-| Postgres | 17 | `data` | Holds the `users_v1` and `users_v2` tables, seeded on first start. |
+| [Flipt](https://www.flipt.io/) | v1.61.1 (chart 0.87.9) | `default` | Evaluates feature flags, with one Flipt namespace per environment (`dev`, `staging`, `prod`). Reads `feature-flags/*.features.yaml` from GitHub (read-only, git storage). One per region, deployed by Argo CD (`flipt-dev`, `region-b-flipt`) from its official chart. |
+| Postgres | 17 | `data` | One per region. A database per environment and cell (`crud_dev`, `crud_staging`, `crud_prod_a1`, `crud_prod_a2`; region B: `crud`), each with the `users_v1` and `users_v2` tables. |
 | [Vault](https://developer.hashicorp.com/vault) | 2.0.4 (chart 0.34.1) | `vault` | Issues short-lived Postgres users; stores the registry login and Kargo's GitHub token. |
 | [Vault Secrets Operator](https://developer.hashicorp.com/vault/docs/platform/k8s/vso) | 1.6.0 | `vault-secrets-operator-system` | Copies secrets from Vault into Kubernetes Secrets, and restarts apps when they change. |
 | [Zot](https://zotregistry.dev/) | v2.1.21 | `registry` | Private OCI registry for the app images: TLS, anonymous pull, authenticated push, web UI, vulnerability scanning. |
 | [GitHub Actions](https://docs.github.com/actions) runner | 2.337.0 | Docker container `github-runner` | Runs the CI workflow on your laptop: builds, scans, pushes to Zot, promotes via Kargo. |
-| [Kargo](https://kargo.io/) | 1.11.4 | `kargo` | Watches Zot for new `frontend-api` tags and promotes them into `dev` through Git. |
+| [Kargo](https://kargo.io/) | 1.11.4 | `kargo` | Watches Zot for new tags and promotes both apps as a pair: `dev → staging → prod`, prod in waves (bigtech) or one stage (small), through Git. |
 | [cert-manager](https://cert-manager.io/) | v1.21.2 | `cert-manager` | Issues Zot's TLS certificate (from a cluster-local CA) and Kargo's webhook certificates. |
 | [metrics-server](https://github.com/kubernetes-sigs/metrics-server) | latest chart | `kube-system` | Supplies CPU metrics to the HPAs. |
-| [Crossplane](https://www.crossplane.io/) | v2.4.2 | `crossplane-system` | Provides the `Cell` API: one small resource becomes a namespace, two Argo CD apps, DB credentials and an access policy. |
-| nginx (global-lb) | 1.29 | Docker container | Global load balancer on `localhost:7080` across both regions' gateways, with failover. |
+| nginx (global-lb) | 1.29 | Docker container | Global load balancer on `localhost:7080` across both regions' gateways, with failover (one config per profile). |
 | [Argo Rollouts](https://argoproj.github.io/rollouts/) | v1.10.0 | `argo-rollouts` | Progressive delivery (canary, blue/green). Installed for Kargo verification, not used yet. |
 
 ### The apps
@@ -168,50 +190,53 @@ flowchart TB
 | `frontend-api` | The public API. Asks Flipt which schema to use, then calls `crud-api`. | `GET /users/{id}`, `GET /healthz` |
 | `crud-api` | Reads users from Postgres. Only reachable from `frontend-api`. | `GET /api/v1/users/{id}`, `GET /api/v2/users/{id}`, `GET /healthz` |
 
-Both are FastAPI apps listening on port 8000, deployed from `localhost:5001/<app>:<version>`. From 1.1.1 the images build on [Chainguard's Python image](https://images.chainguard.dev/directory/image/python/overview): no shell or package manager, non-root user, and **0 known vulnerabilities** in Zot's scan (1.0.0, on `python:3.13-slim`, had 71). `frontend-api` returns an `x-app-version` header so you can see which version answered. Configuration comes from environment variables set in the Helm values files. `crud-api` reads `DB_USER` and `DB_PASSWORD` from the `crud-db` Secret, which the Vault Secrets Operator creates and keeps up to date.
+Both are FastAPI apps listening on port 8000, deployed from `localhost:5001/<app>:<version>`. From 1.1.1 the images build on [Chainguard's Python image](https://images.chainguard.dev/directory/image/python/overview): no shell or package manager, non-root user, and **0 known vulnerabilities** in Zot's scan (1.0.0, on `python:3.13-slim`, had 71). `frontend-api` returns an `x-app-version` header so you can see which version answered. Configuration comes from environment variables set in the Helm values files (for example `FLIPT_NAMESPACE`, `DB_NAME`). `crud-api` reads `DB_USER` and `DB_PASSWORD` from the `crud-db` Secret, which the Vault Secrets Operator creates and keeps up to date.
 
 ## Repository layout
 
 ```
 local-eks-platform/
-├── .github/workflows/build.yml  # CI: build, scan, push, approve, promote
+├── .github/workflows/build.yml  # CI: build, scan, push, approve, promote to dev
 ├── azure-pipelines.yml          # The same pipeline in Azure DevOps syntax (not connected; for comparison)
 ├── apps/
 │   ├── frontend-api/            # FastAPI app, Dockerfile, requirements.txt
 │   └── crud-api/                # FastAPI app, Dockerfile, requirements.txt
-├── feature-flags/
-│   └── features.yaml            # Flipt flags, read from GitHub by Flipt
+├── feature-flags/               # Flipt flags, one file per environment, read from GitHub
+│   └── dev / staging / prod.features.yaml
 ├── k8s-manifests/
-│   ├── charts/base-api/         # One Helm chart for both APIs:
-│   │                            #   Deployment, Service, HPA, ServiceAccount
+│   ├── charts/base-api/         # One Helm chart for both APIs: Deployment, Service, HPA,
+│   │                            #   ServiceAccount; optional Vault DB login, access rule, PDB
 │   ├── apps/                    # Helm values, layered: common first, then one copy's file
 │   │   ├── common/              #   shared by every copy: image repo, env, secrets, replicas
-│   │   ├── dev/                 #   dev's image.tag (Kargo updates it) + canary values
-│   │   └── region-b/            #   region B's image.tag (Kargo) + its DB address
-│   ├── platform/
+│   │   ├── dev/ staging/        #   image.tag (Kargo), DB name, Vault role, flag namespace
+│   │   └── prod/                #   prod-a1/ prod-a2/ prod-b1/ (cells), prod/ (small profile)
+│   ├── platform/                # Shared services, the same in both profiles
 │   │   ├── region-a/
-│   │   │   ├── networking/      # Istio Gateway, VirtualService, AuthorizationPolicy
+│   │   │   ├── networking/      # Gateway, dev + staging routes, namespaces
 │   │   │   ├── data/            # Postgres StatefulSet + seed SQL (no credentials)
-│   │   │   ├── secrets/         # Vault Secrets Operator resources for crud-db
 │   │   │   ├── registry/        # Zot: TLS certs, config, Deployment, NodePort 30500
-│   │   │   ├── kargo/           # Kargo Project, Warehouse, Stages (dev → region-b → cell-a → cell-b), Git credentials
-│   │   │   ├── crossplane/      # The Cell API: XRD, Composition, functions, RBAC
-│   │   │   ├── cells/           # Cell a and Cell b
-│   │   │   ├── regions/         # NodePorts region B uses for Vault and Postgres
+│   │   │   ├── kargo/           # Project, Warehouse, Stages dev + staging, auto-promotion, Git credentials
+│   │   │   ├── regions/         # NodePort 30820: region B reaches Vault
 │   │   │   └── flipt-values.yaml # Flipt's settings (official chart): read flags from Git
-│   │   └── region-b/            # Region B: networking, secrets
-│   └── argocd/                  # Argo CD Applications: region-a.yaml, region-b.yaml
-├── notes/                       # Findings, future improvements, EKS Auto Mode design
+│   │   └── region-b/            # Gateway, namespaces, Postgres (+ NodePort 30432 for Vault)
+│   ├── profiles/                # What prod looks like; the profile app points at one
+│   │   ├── bigtech/             #   ApplicationSet (cells), cell router, Kargo waves
+│   │   └── small/               #   one prod in region B, its routing and Kargo stage
+│   └── argocd/                  # root (app of apps), projects, profile, region-a/b app lists
+├── notes/                       # Roadmap, design, findings, future improvements, EKS Auto Mode
 ├── platform/vault/              # Helm values for Vault
 ├── platform/global-lb/          # nginx configs for the global load balancer, one per profile
 ├── platform/github-runner/      # Dockerfile for the self-hosted CI runner
 ├── scripts/
-│   ├── bootstrap-vault.sh       # Install + configure Vault; `unseal` after restarts
+│   ├── bootstrap-vault.sh       # Vault install + config; `unseal` after restarts;
+│   │                            #   `databases` (a DB per env/cell), `roles`
 │   ├── setup-registry.sh        # Registry login in Vault, node mirrors, docker login
 │   ├── set-kargo-git-token.sh   # Store Kargo's GitHub token in Vault (hidden prompt)
-│   ├── setup-region.sh          # Register region-b with Argo CD and Vault; start global-lb
+│   ├── setup-region.sh          # Region B: Argo CD, Vault, its own database, global-lb
 │   ├── setup-ci.sh              # Build + register the CI runner; repo safety settings; approval environment
-│   ├── flag.sh                  # Ask Flipt about the flag in plain English (flag.sh 1, flag.sh users)
+│   ├── promote.sh               # Promote a version to a Kargo stage (promote.sh prod-a1 1.2.8)
+│   ├── profile.sh               # Switch prod between the bigtech and small profiles
+│   ├── flag.sh                  # Ask Flipt about the flag in plain English (FLIPT_NAMESPACE=prod flag.sh 1)
 │   ├── check-expiry.sh          # When the CI token, Kargo's GitHub token and certificates expire
 │   └── lib.sh                   # Shared helpers
 ├── kind-config.yaml             # Region A: ports 8080, 8443, 5001; registry mirrors
@@ -220,24 +245,27 @@ local-eks-platform/
 └── istio-mtls.yaml              # Mesh-wide STRICT mTLS
 ```
 
-Argo CD Applications in `k8s-manifests/argocd/region-a.yaml` (paths below are under `k8s-manifests/`):
+Argo CD Applications (paths below are under `k8s-manifests/`). Only `root` is applied by hand; it syncs everything in `argocd/`:
 
-| Application | Source | Deploys |
-|---|---|---|
-| `root` | `argocd/` | Every Application in this table (app of apps; the only one applied by hand) |
-| `frontend-api-dev` | `charts/base-api` + `apps/common/` and `apps/dev/frontend-values.yaml` | frontend Deployment, Service, HPA, ServiceAccount |
-| `crud-api-dev` | `charts/base-api` + `apps/common/` and `apps/dev/crud-values.yaml` | crud Deployment, Service, HPA, ServiceAccount |
-| `platform-networking-dev` | `platform/region-a/networking/` | Gateway, VirtualService, AuthorizationPolicy |
-| `postgres-dev` | `platform/region-a/data/` | Postgres StatefulSet, Service, seed SQL |
-| `vault-secrets-dev` | `platform/region-a/secrets/` | Resources that produce the `crud-db` Secret |
-| `registry-dev` | `platform/region-a/registry/` | Zot and its certificates and login |
-| `kargo-dev` | `platform/region-a/kargo/` | Kargo Project, Warehouse, Stages and Git credentials |
-| `flipt-dev` | Flipt's official chart (helm.flipt.io, 0.87.9) + `platform/region-a/flipt-values.yaml` from this repo | Flipt (a "multi-source" app: chart from one place, values from another) |
-| `frontend-api-canary-dev` | `charts/base-api` + the frontend values + `apps/dev/frontend-canary-values.yaml` | The frontend canary Deployment (nothing when `canary.enabled: false`) |
-| `crossplane-dev` | `platform/region-a/crossplane/` | The `Cell` API |
-| `cell-a`, `cell-b` | `platform/region-a/cells/` (one file each) | One `Cell` each; Crossplane then creates `cell-<name>-frontend-api` and `cell-<name>-crud-api` apps |
-| `cross-region-dev` | `platform/region-a/regions/` | NodePort 30820: region B's operator reaches Vault |
-| `region-b-*` (5 apps, in `argocd/region-b.yaml`) | `platform/region-b/`, `apps/region-b/` + the chart | Region B's frontend, crud-api, Flipt, networking and DB credentials, deployed to the `region-b` cluster |
+| Application | Project | Source | Deploys |
+|---|---|---|---|
+| `root` | default | `argocd/` | The projects, the app lists and the `profile` app (app of apps) |
+| `profile` | default | `profiles/bigtech/` or `profiles/small/` | Prod: the apps below marked *(profile)* |
+| `frontend-api-dev`, `crud-api-dev` | nonprod | the chart + `apps/common/` and `apps/dev/` | dev's frontend and crud-api, namespace `dev` |
+| `frontend-api-canary-dev` | nonprod | the chart + dev's frontend values + `apps/dev/frontend-canary-values.yaml` | dev's canary (nothing when `canary.enabled: false`) |
+| `frontend-api-staging`, `crud-api-staging` | nonprod | the chart + `apps/common/` and `apps/staging/` | staging, namespace `staging` |
+| `frontend-api-prod-a1` … `crud-api-prod-b1` *(profile bigtech)* | prod | ApplicationSet `prod-cells`: the chart + `apps/prod/<cell>/` | The three cells, in region A or B |
+| `frontend-api-prod`, `crud-api-prod`, `frontend-api-prod-canary` *(profile small)* | prod | the chart + `apps/prod/prod/` | Small-profile prod in region B |
+| `prod-routing-region-a/b`, `prod-kargo` *(profile)* | default | `profiles/<profile>/...` | Prod routes and prod Kargo stages |
+| `platform-networking-dev` | default | `platform/region-a/networking/` | Gateway, dev and staging routes, namespaces |
+| `postgres-dev` | default | `platform/region-a/data/` | Postgres StatefulSet, Service, seed SQL |
+| `registry-dev` | default | `platform/region-a/registry/` | Zot and its certificates and login |
+| `kargo-dev` | default | `platform/region-a/kargo/` | Kargo Project, Warehouse, dev + staging Stages, auto-promotion, Git credentials |
+| `flipt-dev` | default | Flipt's official chart (helm.flipt.io, 0.87.9) + `platform/region-a/flipt-values.yaml` | Flipt (a "multi-source" app: chart from one place, values from another) |
+| `cross-region-dev` | default | `platform/region-a/regions/` | NodePort 30820: region B's operator reaches Vault |
+| `region-b-networking`, `region-b-postgres`, `region-b-flipt` | default | `platform/region-b/` + Flipt's chart | Region B's gateway, namespaces, Postgres and Flipt |
+
+The `nonprod` project may only deploy into `dev` and `staging`, and `prod` only into the prod namespaces; neither may create cluster-wide objects (`argocd/projects.yaml`).
 
 ## Setup from scratch
 
@@ -287,7 +315,9 @@ unset HASH
 kubectl apply -n argocd -f k8s-manifests/argocd/root.yaml
 
 # 8. Vault: installs Vault + the operator, creates the Postgres admin password,
-#    connects Vault to Postgres and rotates that password.
+#    connects Vault to Postgres and rotates that password, then creates a
+#    database per environment and cell (crud_dev, crud_staging, crud_prod_a1,
+#    crud_prod_a2) with its own Vault connection, role and policy.
 scripts/bootstrap-vault.sh
 
 # 9. Registry: push login in Vault, containerd mirrors on the nodes, docker login
@@ -302,19 +332,15 @@ done
 # 11. Kargo's GitHub token (fine-grained: this repo only, Contents read/write)
 scripts/set-kargo-git-token.sh
 
-# 12. (No Crossplane any more: the prod cells are an Argo CD ApplicationSet,
-#     k8s-manifests/argocd/cells.yaml.)
-
-# 13. CI: runner in Docker, registered with `gh` (must be logged in as the repo owner)
+# 12. CI: runner in Docker, registered with `gh` (must be logged in as the repo owner)
 scripts/setup-ci.sh
 
 kubectl get applications -n argocd -w     # wait for everything: Synced / Healthy
 ```
 
-<details>
-<summary>Optional: region B and the global load balancer</summary>
+### Region B and the global load balancer
 
-Region B needs about 2 GB more memory.
+Both profiles run prod in region B (a cell, or the whole of small-profile prod), so set it up too. It needs about 2 GB more memory.
 
 ```bash
 kind create cluster --name region-b --config=kind-config-region-b.yaml
@@ -331,20 +357,21 @@ kubectl config use-context kind-dev-cluster
 # Region B's nodes pull from region A's Zot
 CLUSTER=region-b REGISTRY_HOST=dev-cluster-control-plane scripts/setup-registry.sh nodes
 
-# Register region B with Argo CD and Vault, start global-lb on localhost:7080
+# Register region B with Argo CD and Vault, connect Vault to region B's own
+# Postgres, start global-lb on localhost:7080 (config for the active profile)
 scripts/setup-region.sh
-# Region B's apps (argocd/region-b.yaml) already exist via the root app and
-# sync on their own now that the cluster is registered.
+# Region B's apps already exist via the root app and sync on their own now
+# that the cluster is registered.
 ```
-
-</details>
 
 What waits for what, so nothing surprises you:
 
-- `postgres-0` waits for the `postgres-admin` Secret (step 8).
-- `crud-api` waits for `crud-db` (step 8) and both apps wait for their images (step 10), showing `ImagePullBackOff` until then.
+- `postgres-0` waits for the `postgres-admin` Secret (step 8; in region B, `setup-region.sh`).
+- Every `crud-api` waits for its `crud-db` Secret (step 8), and all apps wait for their images (step 10), showing `ImagePullBackOff` until then.
 - `registry-dev` and `kargo-dev` retry until the Vault Secrets Operator exists (step 8).
+- `prod-b1` (or small-profile `prod`) waits for region B (`setup-region.sh`).
 - Kargo can't push commits until step 11.
+- The images start at the tags in the values files. Promote your first CI build through `dev → staging → prod` as usual.
 
 **After Docker or the laptop restarts:** Vault starts sealed. Run `scripts/bootstrap-vault.sh unseal`.
 
@@ -375,11 +402,15 @@ kubectl wait pod/curl -n dev --for=condition=Ready --timeout=120s
 ### End to end
 
 ```bash
-curl localhost:8080/users/1
+curl -s -D - localhost:8080/users/1 | grep -iE '^x-(cell|region)|experimental'
+# x-cell: prod-a1   x-region: a
 # {"id":1,"experimental_data":{"name":"Alice","tier":"gold","schema":"v2"}}
+
+curl -s localhost:8080/users/1 -H 'Host: dev.localhost'       # dev
+curl -s localhost:8080/users/1 -H 'Host: staging.localhost'   # staging (x-env: staging)
 ```
 
-`experimental_data` means the flag is on and the request reached the v2 endpoint.
+`experimental_data` means the flag is on and the request reached the v2 endpoint. `dev.localhost` and `staging.localhost` work in a browser and in curl on most systems; the `Host` header form works everywhere.
 
 ### Helm (one chart, two apps)
 
@@ -438,21 +469,24 @@ kubectl exec -n dev curl -c curl -- curl -s http://frontend-api-svc/healthz
 
 ### Feature flags (Flipt)
 
+Each environment has its own flags: `feature-flags/dev.features.yaml`, `staging.features.yaml` and `prod.features.yaml`, one Flipt namespace each. Every frontend asks its own namespace (`FLIPT_NAMESPACE` in its values file), so a flag can change in dev without touching prod. All prod cells share the `prod` flags.
+
 ```bash
-scripts/flag.sh 1          # user 1   ON   (no rule matched, so the flag's default)
-scripts/flag.sh 2 beta     # the same question for a user on the "beta" plan
-scripts/flag.sh users      # users 1 to 8 at once
+scripts/flag.sh 1                          # dev     user 1   ON   (no rule matched, so the flag's default)
+FLIPT_NAMESPACE=prod scripts/flag.sh 1     # the same question in prod's flags
+scripts/flag.sh 2 beta                     # a user on the "beta" plan
+scripts/flag.sh users                      # users 1 to 8 at once
 ```
 
-`flag.sh` asks Flipt exactly what the frontend asks, from a small in-cluster pod, and prints the answer in plain English. The raw call is a `POST` to `http://flipt.default.svc.cluster.local:8080/evaluate/v1/boolean` with `{"namespaceKey":"default","flagKey":"enable-new-schema","entityId":"1","context":{}}`.
+`flag.sh` asks region A's Flipt exactly what the frontend asks, from a small in-cluster pod, and prints the answer in plain English. The raw call is a `POST` to `http://flipt.default.svc.cluster.local:8080/evaluate/v1/boolean` with `{"namespaceKey":"dev","flagKey":"enable-new-schema","entityId":"1","context":{}}`.
 
-To change a flag, edit `feature-flags/features.yaml`, commit and push. Flipt picks it up within about 30 seconds (17 in testing). Region B runs its own Flipt, so for a few seconds the two regions can give different answers. For example, set `enabled: false` and `curl localhost:8080/users/1` returns `{"id":1,"standard_data":"Alice (v1 schema)"}`. Percentage rollouts and segments go under `rollouts:` on the flag. See the [Flipt docs](https://docs.flipt.io/).
+To change a flag, edit that environment's file, commit and push. Flipt picks it up within about 30 seconds (17 in testing). Region B runs its own Flipt reading the same files, so for a few seconds the two regions can give different answers. For example, set `enabled: false` in `dev.features.yaml` and `curl localhost:8080/users/1 -H 'Host: dev.localhost'` returns `{"id":1,"standard_data":"Alice (v1 schema)"}` while prod still returns v2. Percentage rollouts and segments go under `rollouts:` on the flag. See the [Flipt docs](https://docs.flipt.io/).
 
-If Flipt crash-loops after a push, the file has a field Flipt doesn't accept. `kubectl logs deploy/flipt -c flipt` names the line.
+If Flipt crash-loops after a push, a file has a field Flipt doesn't accept. `kubectl logs deploy/flipt -c flipt` names the line.
 
 ### Argo CD
 
-The clearest way to see Argo CD work: change one number in Git and watch the cluster follow. Set `minReplicas: 2` in `apps/dev/frontend-values.yaml` (under `autoscaling:`), commit, push, then `kubectl get pods -n dev -l app=frontend-api -w`. A second pod appeared 129 seconds later in testing (Argo CD's regular check of Git). Revert it and make Argo CD look straight away with `kubectl annotate application frontend-api-dev -n argocd argocd.argoproj.io/refresh=normal --overwrite`: 3 seconds. Note that the cells use the same values file, so they follow the change too.
+The clearest way to see Argo CD work: change one number in Git and watch the cluster follow. Set `minReplicas: 2` in `apps/dev/frontend-values.yaml` (under `autoscaling:`), commit, push, then `kubectl get pods -n dev -l app=frontend-api -w`. A second pod appeared 129 seconds later in testing (Argo CD's regular check of Git). Revert it and make Argo CD look straight away with `kubectl annotate application frontend-api-dev -n argocd argocd.argoproj.io/refresh=normal --overwrite`: 3 seconds. Only dev changes: staging and prod have their own values files. A change in `apps/common/` reaches every copy.
 
 ```bash
 kubectl get applications -n argocd                 # all Synced / Healthy
@@ -472,6 +506,14 @@ kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.pas
 kubectl annotate application frontend-api-dev -n argocd argocd.argoproj.io/refresh=normal --overwrite
 ```
 
+**Guardrails (Argo CD projects).** Apps in project `nonprod` may only deploy into `dev` and `staging`. Point one at a prod namespace and Argo CD refuses:
+
+```bash
+kubectl get applications -n argocd -o custom-columns=APP:.metadata.name,PROJECT:.spec.project
+# an app in nonprod aimed at prod-a1 shows:
+#   InvalidSpecError: ... namespace 'prod-a1' do not match any of the allowed destinations in project 'nonprod'
+```
+
 A hand-made revert isn't known to Kargo, which still lists the newer Freight for `dev`. To roll back a promoted version properly, promote the older Freight in Kargo. For about a minute after any rollout, the app shows `Degraded` and Kargo's Stage `Unhealthy`, because the new pod has no CPU metrics yet.
 
 ### CI (GitHub Actions)
@@ -482,11 +524,12 @@ gh run list --limit 3                          # recent runs
 gh run watch                                   # follow a run live
 ```
 
-Try it: change `healthz` in `apps/frontend-api/main.py` to return `{"status": "ok", "hello": "from CI"}`, commit and push. The run builds and scans both images as `1.2.<run number>`, then waits. Approve it on GitHub (Actions → the run → **Review deployments** → dev → **Approve and deploy**). Then:
+Try it: change `healthz` in `apps/frontend-api/main.py` to return `{"status": "ok", "hello": "from CI"}`, commit and push. The run builds and scans both images as `1.2.<run number>`, then waits. Approve it on GitHub (Actions → the run → **Review deployments** → dev → **Approve and deploy**). Kargo then promotes dev, and staging follows by itself once dev is verified. Then:
 
 ```bash
-git pull && git log --oneline -1       # dev: frontend-api 1.2.3 (promoted by Kargo)
-curl -s -D - localhost:8080/healthz    # x-app-version: 1.2.3 ... {"status":"ok","hello":"from CI"}
+git pull && git log --oneline -2       # staging: ... 1.2.N / dev: ... 1.2.N (promoted by Kargo)
+curl -s -D - localhost:8080/healthz -H 'Host: dev.localhost'   # x-app-version: 1.2.N ... "hello":"from CI"
+scripts/promote.sh prod-a1 1.2.N       # prod when you're happy; prod-a2 and prod-b1 follow
 ```
 
 Tested end to end, including the undo (run 4, `1.2.4`). The first real fix shipped this way was crud-api's `pool_pre_ping`, for a `connection is closed` error after idle periods.
@@ -508,50 +551,61 @@ The first Chainguard build (1.1.0) still had 3. They were in pip, which the buil
 
 ### Canary release (Istio)
 
-The frontend has a second Deployment, `frontend-api-canary`, controlled by `frontend-canary-values.yaml`. Istio splits gateway traffic between the `stable` and `canary` pods by weight (`networking/istio-networking.yaml`), and the header `x-canary: always` forces the canary.
+dev's frontend has a second Deployment, `frontend-api-canary`, controlled by `apps/dev/frontend-canary-values.yaml`. Istio splits `dev.localhost` traffic between the `stable` and `canary` pods by weight (`platform/region-a/networking/istio-networking.yaml`), and the header `x-canary: always` forces the canary. The small profile has the same canary for prod (`apps/prod/prod/frontend-canary-values.yaml`, weights in `profiles/small/routing-region-b/`). In the bigtech profile the canary is the first wave: `prod-a1` gets a release alone for 10 minutes.
 
 ```bash
-# 1. Pods first: canary.enabled: true and image.tag: <new tag> in frontend-canary-values.yaml;
+# 1. Pods first: canary.enabled: true and image.tag: <new tag> in apps/dev/frontend-canary-values.yaml;
 #    commit, push, wait for `kubectl get deploy frontend-api-canary -n dev` to show 1/1.
 # 2. Then traffic: stable/canary weights 90/10 in both VirtualServices; commit, push.
 # 3. Count which version answers
-for i in $(seq 1 200); do curl -s -o /dev/null -D - localhost:8080/users/1 | grep -i '^x-app-version' ; done | sort | uniq -c
+for i in $(seq 1 200); do curl -s -o /dev/null -D - -H 'Host: dev.localhost' localhost:8080/users/1 | grep -i '^x-app-version' ; done | sort | uniq -c
 #     174 x-app-version: <stable tag>
 #      26 x-app-version: <canary tag>      (about 10%)
-curl -s -o /dev/null -D - -H 'x-canary: always' localhost:8080/users/1 | grep -i '^x-app-version'
+curl -s -o /dev/null -D - -H 'Host: dev.localhost' -H 'x-canary: always' localhost:8080/users/1 | grep -i '^x-app-version'
 # 4. Happy? Promote the same tag to stable with Kargo (below).
 # 5. Reverse order to switch off: weights back to 100/0 (commit, push, wait), then canary.enabled: false.
 ```
 
 **Why pods and weights go in separate commits:** in one commit, Argo CD may apply the weights before the canary pods exist, and that 10% of users gets `503`. Tested under continuous traffic: one commit gave 7 errors; two commits (on, and later off) gave 0 out of 267.
 
-### Cells (Crossplane)
+### Prod cells and waves (bigtech profile)
 
 ```bash
-kubectl get cells                                   # NAME  FRONTEND  CRUD   SYNCED  READY
-                                                    # a     1.1.1     1.1.1  True    True
-# Odd user IDs go to cell a, even to cell b; x-cell pins a request
-for u in 1 2 3 4; do curl -s -o /dev/null -D - http://cells.localhost:8080/users/$u | grep -i '^x-cell'; done
-# x-cell: a / x-cell: b / x-cell: a / x-cell: b
-curl -s -D - -H 'x-cell: b' http://cells.localhost:8080/users/1 | grep -i '^x-cell'
+# Odd user IDs go to prod-a1, even to prod-a2; x-cell pins a request
+for u in 1 2 3 4; do curl -s -o /dev/null -D - localhost:8080/users/$u | grep -i '^x-cell'; done
+# x-cell: prod-a1 / prod-a2 / prod-a1 / prod-a2
+curl -s -o /dev/null -D - -H 'x-cell: prod-a2' localhost:8080/users/1 | grep -i '^x-cell'
 
-# Cells are isolated: cell a's frontend identity can't call cell b's crud-api
-kubectl run xcell -n cell-a --image=curlimages/curl --restart=Never \
+# Each cell reads its own database
+kubectl exec -n data postgres-0 -- psql -U postgres -Atc \
+  "select datname, count(*) from pg_stat_activity where usename like 'v-%' group by 1"
+# crud_dev|1  crud_prod_a1|1  crud_prod_a2|1  crud_staging|1
+
+# Cells are isolated: prod-a1's frontend identity can't call prod-a2's crud-api
+kubectl run xcell -n prod-a1 --image=curlimages/curl --restart=Never \
   --overrides='{"spec":{"serviceAccountName":"frontend-api"}}' --command -- sleep 300
-kubectl exec -n cell-a xcell -c xcell -- curl -s http://crud-api-svc.cell-b.svc.cluster.local/api/v1/users/1
+kubectl exec -n prod-a1 xcell -c xcell -- curl -s http://crud-api-svc.prod-a2.svc.cluster.local/api/v1/users/1
 # RBAC: access denied
-kubectl delete pod xcell -n cell-a
+kubectl delete pod xcell -n prod-a1
 ```
 
-**Add a cell:** copy `k8s-manifests/platform/region-a/cells/cell-a.yaml` to a new file with a new name, add an Argo CD app for it in `argocd/region-a.yaml` (like `cell-a`), push, and add a route for it in the `cell-router` VirtualService. Crossplane creates the namespace, both Argo CD apps, the Vault credential resources and the access policy. Each cell gets its own DB user; cells share the one Postgres to save memory. A production cell would also have its own data store.
+**Waves.** A release reaches prod one cell at a time. You promote the first wave; Kargo does the rest once the release has run in the wave before for 10 minutes (`requiredSoakTime`):
 
-If `cells.localhost` doesn't resolve on your machine, use `curl -H 'Host: cells.localhost' localhost:8080/users/1`.
+```bash
+scripts/promote.sh prod-a1 1.2.N      # wave 1, the canary cell
+kubectl get stages -n local-eks-platform -w
+# prod-a2 promotes itself ~10 min later, prod-b1 ~10 min after that
+```
+
+Measured: `prod-a2` followed 13 minutes after `prod-a1`, `prod-b1` 11 minutes later, with 0 failed requests out of 315 meanwhile. Promoting a version to `prod-a2` by hand before it has baked is refused (`Freight is not available to this Stage`).
+
+**Add a cell** (for example `prod-a3`): one element in the ApplicationSet list (`profiles/bigtech/apps.yaml`), values files in `apps/prod/prod-a3/`, its namespace in `platform/region-a/networking/namespaces.yaml`, `prod-a3` in `ENVIRONMENTS` in `scripts/bootstrap-vault.sh` (then `scripts/bootstrap-vault.sh databases`), a Kargo stage in `profiles/bigtech/kargo/`, and a route in `profiles/bigtech/routing-region-a/`.
 
 ### Multi-region
 
 ```bash
-curl -s -D - localhost:8080/users/2 | grep -i x-region    # x-region: a
-curl -s -D - localhost:9080/users/2 | grep -i x-region    # x-region: b
+curl -s -D - localhost:8080/users/2 | grep -iE '^x-(region|cell)'    # x-region: a, x-cell: prod-a2
+curl -s -D - localhost:9080/users/2 | grep -iE '^x-(region|cell)'    # x-region: b, x-cell: prod-b1
 
 # The global load balancer spreads requests
 for i in $(seq 1 40); do curl -s -o /dev/null -D - localhost:7080/users/1 | grep -i '^x-region'; done | sort | uniq -c
@@ -565,19 +619,27 @@ for i in $(seq 1 20); do curl -s -o /dev/null -w '%{http_code} ' -D - localhost:
 kubectl scale deploy istio-ingressgateway -n istio-system --replicas=1
 ```
 
-Measured here: 176 requests during a 25-second region A outage, all returned 200.
+Measured here: 176 requests during a 25-second region A outage, all returned 200. Releases reach region B last, in wave 3.
 
-**Releases go region by region.** Kargo's `region-b` Stage only accepts Freight that `dev` (region A) already has:
+What's simplified: region B has its own database, but no Vault of its own and no replication between the two regions' databases, so region A's Vault is still a single point of failure for new DB logins. Real multi-region setups replicate the database and run Vault per region (or use a managed service), and often connect the service meshes (Istio multi-cluster) so services can fail over individually.
+
+### Profiles: bigtech or small
 
 ```bash
-# Promoting a new tag straight to region-b is refused:
-#   spec.freight: Invalid value: ...: Freight is not available to this Stage
-# Promote to dev first, then region-b. Each promotion is a Kargo commit:
-#   dev: frontend-api 1.1.2 (promoted by Kargo)
-#   region-b: frontend-api 1.1.2 (promoted by Kargo)
+scripts/profile.sh               # Active profile: bigtech
+scripts/profile.sh small         # prod = one copy in region B (2 replicas + canary)
+scripts/profile.sh bigtech       # prod = cells in two regions, released in waves
 ```
 
-What's simplified: region B has its own database, but no Vault of its own and no replication between the two databases, so region A's Vault is still a single point of failure for new DB logins. Real multi-region setups replicate the database and run Vault per region (or use a managed service), and often connect the service meshes (Istio multi-cluster) so services can fail over individually.
+`profile.sh` changes one line in `k8s-manifests/argocd/profile.yaml`, commits `profile: <name>`, pushes, and restarts `global-lb` with the matching config. Argo CD removes the old prod and deploys the new one; dev and staging aren't touched. Measured: prod answered again after about 20 seconds (to small) and 13 seconds (to bigtech). The new prod starts at the image tags in its values files; Kargo's new prod stages have no history, so promote the next release as usual (`promote.sh prod <version>` in small, `prod-a1` in bigtech).
+
+| | bigtech | small |
+|---|---|---|
+| Prod apps | 3 cells × 2 apps | 2 apps × 2 replicas + canary |
+| `localhost:8080` | region A cells | no prod (404); dev and staging still on their hostnames |
+| `localhost:9080` / `7080` | `prod-b1` / both regions | prod / region B only |
+| Kargo | `prod-a1 → prod-a2 → prod-b1` | `prod` |
+| Memory (both clusters) | ≈ 8.7 GB | ≈ 8.3 GB |
 
 ### Autoscaling (HPA)
 
@@ -616,9 +678,12 @@ curl -s -o /dev/null -w "%{http_code}\n" localhost:8080/users/1  # 200
 scripts/bootstrap-vault.sh unseal                               # Vault unsealed.
 ```
 
+Each namespace has its own Vault role (`crud-api-dev`, `crud-api-staging`, `crud-api-prod-a1`, …) that can read users only for its own database. `scripts/bootstrap-vault.sh databases` creates the databases and their Vault connections; it's safe to re-run.
+
 What was verified on this cluster:
 
 - The issued user can `SELECT` from `users_v1` and `users_v2`, but gets `must be owner of table` when trying `DROP` or `DELETE`.
+- A staging user reads `crud_staging` but is refused on `crud_dev` (`permission denied`).
 - The bootstrap admin password in `postgres-admin` is rejected (`password authentication failed`) after Vault rotates it. Only Vault knows the current one.
 - Credentials last 1 hour and are renewed up to 24 hours. After that, Vault issues a new user, the operator updates `crud-db` and restarts `crud-api`.
 
@@ -656,40 +721,36 @@ The web UI is at `https://localhost:5001`. The browser warns about the certifica
 # UI at https://localhost:8444 (user: admin, the password from setup step 6)
 kubectl port-forward svc/kargo-api -n kargo 8444:443
 
-# Every tag the Warehouse found in Zot becomes Freight
+# Every pair of tags the Warehouse found in Zot becomes Freight
 kubectl get freight -n local-eks-platform \
-  -o jsonpath='{range .items[*]}{.alias}: {.images[0].tag}{"\n"}{end}'
-# exhaling-mole: 1.0.0
-# eloping-wombat: 1.0.1
+  -o jsonpath='{range .items[*]}{.alias}: {.images[*].tag}{"\n"}{end}'
 
-# Promote a tag to dev without the UI
-FREIGHT=$(kubectl get freight -n local-eks-platform \
-  -o jsonpath='{range .items[?(@.images[0].tag=="1.0.1")]}{.metadata.name}{end}')
-cat <<EOF | kubectl create -f -
-apiVersion: kargo.akuity.io/v1alpha1
-kind: Promotion
-metadata:
-  generateName: dev-
-  namespace: local-eks-platform
-spec:
-  stage: dev
-  freight: $FREIGHT
-EOF
-kubectl get promotions -n local-eks-platform     # PHASE: Succeeded
+# The stages and what each holds
+kubectl get stages -n local-eks-platform
+# dev  staging  prod-a1  prod-a2  prod-b1     (small profile: dev  staging  prod)
+
+# Promote a version to a stage (Kargo refuses to skip one)
+scripts/promote.sh prod-a1 1.2.8
 ```
+
+| Stage | Promoted by |
+|---|---|
+| `dev` | CI, after your approval on GitHub |
+| `staging` | Kargo, automatically, once dev has verified the release (set up 28 Sep; first real run with the next CI release) |
+| `prod-a1` (bigtech) or `prod` (small) | You |
+| `prod-a2`, `prod-b1` (bigtech) | Kargo, automatically, after a 10-minute bake in the wave before |
+
+Automatic stages carry the label `platform.local/auto-promote: "true"`; one `ProjectConfig` in `platform/region-a/kargo/` turns auto-promotion on for them.
 
 After a successful promotion:
 
-- GitHub shows a commit by **Kargo**: `dev: frontend-api 1.0.1 (promoted by Kargo)`.
-- `kubectl get stage dev -n local-eks-platform` shows `Freight has been verified`.
-- `kubectl get deploy frontend-api -n dev -o jsonpath='{.spec.template.spec.containers[0].image}'` shows `localhost:5001/frontend-api:1.0.1`.
+- GitHub shows a commit by **Kargo**: `staging: frontend-api 1.2.8, crud-api 1.2.8 (promoted by Kargo)`.
+- `kubectl get stage staging -n local-eks-platform` shows `Freight has been verified`.
 - Run `git pull` before your next local commit, since Kargo pushed to `main`.
-
-**Shipping a real code change** is the same loop: edit `apps/frontend-api`, then `docker build -t localhost:5001/frontend-api:1.0.2 apps/frontend-api && docker push localhost:5001/frontend-api:1.0.2`, and promote the new Freight.
 
 ## Full walkthrough
 
-Every step of the flow was tested in one continuous run on 26 Sep 2026, then undone the same way:
+Every step of the flow was tested in one continuous run on 26 Sep 2026, then undone the same way. (That was before the dev/staging/prod layout: `region-b` and the Crossplane cells have since become the prod waves and ApplicationSet cells.)
 
 1. **Code:** change `apps/frontend-api`, push. CI (run 5) built and scanned `1.2.5` and waited for approval.
 2. **Approve:** Kargo committed `dev: frontend-api 1.2.5`; Argo CD rolled it out in region A.
@@ -707,6 +768,7 @@ Not yet tested: a clean rebuild from an empty laptop using "Setup from scratch".
 | Note | What's in it |
 |---|---|
 | [notes/roadmap.md](notes/roadmap.md) | **Where things stand:** exercises done and next, platform work by group, dates to remember. |
+| [notes/environments-design.md](notes/environments-design.md) | The dev → staging → prod design: the two profiles, why cells, the laptop shortcuts, and the phases it was built in. |
 | [notes/findings.md](notes/findings.md) | Every problem hit while building this (Norton, cgroup v1, canary 503s, Vault Secrets Operator after a seal, stale DB connections, and more): cause, fix, and where it's handled now. Plus measured timings. |
 | [notes/future-improvements.md](notes/future-improvements.md) | Known gaps, starting with the untested clean rebuild; resilience, security and delivery improvements. |
 | [notes/eks-auto-mode.md](notes/eks-auto-mode.md) | How each part behaves on Amazon EKS Auto Mode with ECR, CI via GitHub OIDC, Kargo and Argo CD: what stays, what changes, what to plan for, and a migration order. |
@@ -731,11 +793,15 @@ Renewed automatically: crud-api's DB users (hourly), Zot's TLS certificate (2027
 | `... is not recognized as the name of a cmdlet` | Bash syntax typed into PowerShell | Use Git Bash, or the PowerShell form in [Windows notes](#windows-notes) |
 | `argocd-applicationset-controller` in CrashLoopBackOff | Argo CD installed with client-side apply; ApplicationSet CRD missing | Re-apply with `--server-side --force-conflicts` |
 | kind fails at "Starting control-plane" | Kubernetes ≥ 1.35 on a cgroup v1 host | Use the pinned v1.34 image, or switch WSL2 to cgroup v2 |
-| Flipt CrashLoopBackOff | Invalid field in `features.yaml` on GitHub | Check `kubectl logs deploy/flipt -c flipt`, fix, push |
-| `403 RBAC: access denied` calling crud-api | AuthorizationPolicy: only `sa/frontend-api` may call it | Expected. Edit `networking/istio-networking.yaml` to allow more callers |
-| Empty reply from `localhost:8080` | No Gateway/VirtualService applied | Check `kubectl get gateway,virtualservice -A` and the `platform-networking-dev` app |
+| Flipt CrashLoopBackOff | Invalid field in a `feature-flags/*.features.yaml` file on GitHub | Check `kubectl logs deploy/flipt -c flipt`, fix, push |
+| `403 RBAC: access denied` calling crud-api | AuthorizationPolicy: only the same namespace's `sa/frontend-api` may call it | Expected. Add callers with `allowCallersFrom` in that crud-api's values file |
+| Empty reply from `localhost:8080` | No Gateway/VirtualService applied | Check `kubectl get gateway,virtualservice -A`, the `platform-networking-dev` and `prod-routing-region-a` apps |
+| `404` from `localhost:8080` | Small profile: region A has no prod | Expected; prod is on `localhost:9080` / `7080`. `scripts/profile.sh` shows the profile |
+| `503` with an empty body for a route with `stable`/`canary` subsets | Its DestinationRule isn't in the service's namespace, so the gateway ignores it | Put the DestinationRule next to the service (see findings) |
 | HPA shows `<unknown>` | metrics-server missing | Install it with `--kubelet-insecure-tls` |
-| `crud-api` stuck in `CreateContainerConfigError` | `crud-db` Secret doesn't exist yet | Run `scripts/bootstrap-vault.sh`; check `kubectl get vaultdynamicsecret crud-db -n dev` |
+| `crud-api` stuck in `CreateContainerConfigError` | `crud-db` Secret doesn't exist yet | Run `scripts/bootstrap-vault.sh`; check `kubectl get vaultdynamicsecret crud-db -n <namespace>` |
+| `crud-api` 500 `permission denied for table` after changing its database or Vault path | The operator keeps the old lease until it expires | Delete that namespace's `crud-db` Secret; the operator fetches new credentials |
+| `403 permission denied` from Vault in the operator's events after changing a Vault policy | The operator's Vault login keeps the policies it was issued with | Restart the operator: `kubectl rollout restart deploy -n vault-secrets-operator-system vault-secrets-operator-controller-manager` |
 | `vault-0` Running but `0/1` Ready | Vault is sealed (it seals on every restart) | `scripts/bootstrap-vault.sh unseal` |
 | `ImagePullBackOff` for `localhost:5001/...` | Image not pushed, or node mirrors not set up | `curl -sk https://localhost:5001/v2/_catalog`; re-run `scripts/setup-registry.sh nodes` |
 | `docker push` fails with `manifest invalid` | Zot rejects Docker v2 manifests unless `compat: docker2s2` is set | Already set in `registry/zot.yaml`; check the ConfigMap was synced |
@@ -746,7 +812,8 @@ Renewed automatically: crud-api's DB users (hourly), Zot's TLS certificate (2027
 | A pushed change isn't live yet | Argo CD checks Git every few minutes | Click Refresh, or `kubectl annotate application <app> -n argocd argocd.argoproj.io/refresh=normal --overwrite` |
 | Argo CD sync fails with `field is immutable` on a Deployment `selector` | The chart changed the Deployment's labels (for example adding `track`) | Delete the Deployment once; Argo CD recreates it (a few seconds of downtime) |
 | Disabled canary still running, app `OutOfSync` | Argo CD won't auto-sync an app down to zero resources | `allowEmpty: true` on the canary app (already set) |
-| `Cell` stays `READY False` | Crossplane only sees a `Ready` condition; Argo CD apps and AuthorizationPolicies don't have one | The Composition sets readiness from Argo CD health (already set) |
+| `kargo-dev` or `prod-kargo` `OutOfSync` with nothing to fix | Kargo stores durations as `10m0s`; Git said `10m` | Write durations the way Kargo stores them (already done) |
+| An app shows `InvalidSpecError ... not permitted in project` | Its destination isn't allowed by its Argo CD project | Expected guardrail; use the right project (`argocd/projects.yaml`) |
 | CI run stuck in "Queued" | The runner container isn't running | `docker ps -a --filter name=github-runner`; `scripts/setup-ci.sh runner` recreates it |
 | CI fails at "Log in to Zot" with `403` from Vault | The runner's Vault token expired (30 days) or Vault is sealed | `scripts/bootstrap-vault.sh unseal`, then `scripts/setup-ci.sh runner` |
 | CI stops at the scan step | Zot found a high or critical vulnerability | Update the base image or the dependency it names, push again |
@@ -762,7 +829,8 @@ Renewed automatically: crud-api's DB users (hourly), Zot's TLS certificate (2027
 | Secret | Created by | Stored in | Who can read it |
 |---|---|---|---|
 | Postgres admin password | `bootstrap-vault.sh` (random, 32 chars) | Vault; the original is left in the `data/postgres-admin` Secret but no longer works | Vault only, after `rotate-root` |
-| `crud-api` DB user + password | Vault's database engine, on request | `default/crud-db` Secret, written by the Vault Secrets Operator | `crud-api` pods |
+| `crud-api` DB user + password | Vault's database engine, on request, in that namespace's own database | `<namespace>/crud-db` Secret, written by the Vault Secrets Operator | That namespace's `crud-api` pods |
+| Vault's admin login per database (`vault_dev`, `vault_staging`, …) | `bootstrap-vault.sh databases` (random) | Vault only, after `rotate-root` | Vault only |
 | Registry push login (`pusher`) | `setup-registry.sh` (random) | Vault `kv/registry/pusher`; Zot gets only a bcrypt hash via `kv/registry/htpasswd` | You, through `setup-registry.sh login` |
 | Kargo's GitHub token | You, at a hidden prompt | Vault `kv/kargo/github`, copied to `local-eks-platform/github-creds` | Kargo |
 | CI runner's Vault token | `setup-ci.sh` (policy `ci-registry`: read `kv/registry/pusher` only, 30 days) | Inside the `github-runner` container only | The runner |
@@ -774,18 +842,18 @@ Renewed automatically: crud-api's DB users (hourly), Zot's TLS certificate (2027
 
 How `crud-api` gets its credentials:
 
-1. The Vault Secrets Operator authenticates to Vault with a token for `crud-api`'s ServiceAccount (Kubernetes auth, role `crud-api`, audience `vault`).
-2. Vault's policy lets that role read only `database/creds/crud-api`.
-3. Reading that path makes Vault create a brand-new Postgres user with `SELECT` on two tables. The user expires on its own (`VALID UNTIL`).
+1. The Vault Secrets Operator authenticates to Vault with a token for `crud-api`'s ServiceAccount in that namespace (Kubernetes auth, role `crud-api-<namespace>`, audience `vault`; region B uses its own auth mount, `kubernetes-region-b`).
+2. Vault's policy lets that role read only `database/creds/crud-api-<namespace>`.
+3. Reading that path makes Vault create a brand-new Postgres user, in that namespace's database only, with `SELECT` on two tables. The user expires on its own (`VALID UNTIL`).
 4. The operator writes the username and password to the `crud-db` Secret. The Deployment maps them to `DB_USER` and `DB_PASSWORD`.
 5. The operator renews the lease. When it can't be renewed any more, it fetches a new user and restarts `crud-api`. Vault drops the old user when its lease expires.
 
-A leaked `crud-db` password is therefore read-only, limited to one database, and dead within a day at most. Zot and Kargo follow the same pattern: each has its own ServiceAccount and Vault role that can read only its own secret.
+A leaked `crud-db` password is therefore read-only, limited to one environment's database, and dead within a day at most. Zot and Kargo follow the same pattern: each has its own ServiceAccount and Vault role that can read only its own secret.
 
 ### Rules for contributors
 
 - Never commit a password, token, key or `.env` file. `.gitignore` blocks the usual file names. The [gitleaks](https://github.com/gitleaks/gitleaks) pre-commit hook blocks the rest: `pip install pre-commit && pre-commit install`.
-- Put a new app secret in Vault, then add a `VaultStaticSecret` or `VaultDynamicSecret` under `k8s-manifests/platform/region-a/secrets/`. Reference it from the values file with `secretEnv`, as `apps/common/crud-values.yaml` does.
+- Put a new app secret in Vault. For DB credentials, turn on `vaultDbCredentials` in the app's values file (the chart adds the Vault Secrets Operator resources, as `apps/dev/crud-values.yaml` does); for anything else add a `VaultStaticSecret`. Reference the Secret from the values file with `secretEnv`, as `apps/common/crud-values.yaml` does.
 - Pass secrets to CLIs on stdin or at a hidden prompt (`read -rs`), not as command-line arguments. Arguments show up in shell history and process lists.
 - Give tokens the least access that works: Kargo's GitHub token should be fine-grained, limited to this repository, with only **Contents: Read and write**.
 - Turn on GitHub [secret scanning and push protection](https://docs.github.com/en/code-security/secret-scanning) for the repo.
