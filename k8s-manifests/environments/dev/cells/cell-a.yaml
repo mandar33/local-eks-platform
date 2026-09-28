@@ -7,5 +7,5 @@ kind: Cell
 metadata:
   name: a
 spec:
-  frontendTag: 1.2.7
-  crudTag: 1.2.7
+  frontendTag: 1.2.8
+  crudTag: 1.2.8
