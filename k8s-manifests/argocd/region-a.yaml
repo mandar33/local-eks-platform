@@ -250,6 +250,9 @@ kind: Application
 metadata:
   name: crossplane-dev
   namespace: argocd
+  # Being retired (phase 7): deleting this app also deletes what it deployed.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
 spec:
   # The Cell API: Crossplane functions, RBAC, XRD and Composition.
   project: default
@@ -276,6 +279,9 @@ kind: Application
 metadata:
   name: cell-a
   namespace: argocd
+  # Being retired (phase 7): deleting this app also deletes what it deployed.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
   annotations:
     # Lets Kargo's "cell-a" Stage trigger syncs of this app.
     kargo.akuity.io/authorized-stage: local-eks-platform:cell-a
@@ -307,6 +313,9 @@ kind: Application
 metadata:
   name: cell-b
   namespace: argocd
+  # Being retired (phase 7): deleting this app also deletes what it deployed.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
   annotations:
     # Lets Kargo's "cell-b" Stage trigger syncs of this app.
     kargo.akuity.io/authorized-stage: local-eks-platform:cell-b

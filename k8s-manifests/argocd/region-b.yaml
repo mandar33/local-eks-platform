@@ -7,6 +7,9 @@ kind: Application
 metadata:
   name: region-b-frontend-api
   namespace: argocd
+  # Being retired (phase 7): deleting this app also deletes what it deployed.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
   annotations:
     # Lets Kargo's region-b Stage trigger syncs of this app.
     kargo.akuity.io/authorized-stage: local-eks-platform:region-b
@@ -34,6 +37,9 @@ kind: Application
 metadata:
   name: region-b-crud-api
   namespace: argocd
+  # Being retired (phase 7): deleting this app also deletes what it deployed.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
   annotations:
     # Lets Kargo's region-b Stage trigger syncs of this app.
     kargo.akuity.io/authorized-stage: local-eks-platform:region-b
@@ -101,6 +107,9 @@ kind: Application
 metadata:
   name: region-b-secrets
   namespace: argocd
+  # Being retired (phase 7): deleting this app also deletes what it deployed.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
   source:

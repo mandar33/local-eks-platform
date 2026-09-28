@@ -1,0 +1,9 @@
+# Prod cell in region B (bigtech profile), created by the prod-cells
+# ApplicationSet (argocd/cells.yaml). Declared here with Istio's sidecar
+# injection label so it exists before the apps are deployed into it.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: prod-b1
+  labels:
+    istio-injection: enabled

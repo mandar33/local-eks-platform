@@ -94,11 +94,13 @@ setup_vault() {
 }
 
 # crud-api in the region logs in here and may read only the region's own
-# database (see setup_database).
+# database (see setup_database). REGION_NAMESPACES: where crud-api runs in
+# this region (the prod cell, prod-b1).
+REGION_NAMESPACES="${REGION_NAMESPACES:-prod-b1}"
 write_region_role() {
   vault_run write "auth/kubernetes-$REGION/role/crud-api" \
     bound_service_account_names=crud-api \
-    bound_service_account_namespaces=default \
+    bound_service_account_namespaces="$REGION_NAMESPACES" \
     audience=vault \
     token_policies="crud-api-$REGION" \
     token_ttl=1h >/dev/null

@@ -5,8 +5,8 @@
 #   scripts/bootstrap-vault.sh           install, init, unseal, configure
 #   scripts/bootstrap-vault.sh unseal    unseal only (Vault seals on every restart)
 #   scripts/bootstrap-vault.sh roles     (re)write the app login roles only
-#   scripts/bootstrap-vault.sh databases a database per environment (dev,
-#                                        staging) + its Vault connection and roles
+#   scripts/bootstrap-vault.sh databases a database per namespace in ENVIRONMENTS
+#                                        (dev, staging, prod cells) + Vault access
 #
 # No secret is ever written to this repo:
 # - The Vault unseal key and root token go to $STATE_DIR/vault-init.json
@@ -75,25 +75,20 @@ write_app_roles() {
     token_policies=crud-api \
     token_ttl=1h >/dev/null
 
-  # One role per environment namespace, reading only that environment's
-  # database. A policy change reaches the Vault Secrets Operator only when it
-  # logs in again: restart it (as `unseal` does) after changing one here.
-  vault_run write auth/kubernetes/role/crud-api-dev \
-    bound_service_account_names=crud-api \
-    bound_service_account_namespaces=dev \
-    audience=vault \
-    token_policies=crud-api-dev \
-    token_ttl=1h >/dev/null
-  vault_run write auth/kubernetes/role/crud-api-staging \
-    bound_service_account_names=crud-api \
-    bound_service_account_namespaces=staging \
-    audience=vault \
-    token_policies=crud-api-staging \
-    token_ttl=1h >/dev/null
-  echo "Vault roles written: crud-api (default), crud-api-cells (cell-*), crud-api-dev (dev), crud-api-staging (staging)."
+  # One role per namespace in ENVIRONMENTS (below), reading only that
+  # namespace's database. A policy change reaches the Vault Secrets Operator
+  # only when it logs in again: restart it (as `unseal` does) after a change.
+  local env
+  for env in "${ENVIRONMENTS[@]}"; do
+    vault_run write "auth/kubernetes/role/crud-api-$env"       bound_service_account_names=crud-api       bound_service_account_namespaces="$env"       audience=vault       token_policies="crud-api-$env"       token_ttl=1h >/dev/null
+  done
+  echo "Vault roles written: crud-api (default), crud-api-cells (cell-*), and crud-api-<ns> for: ${ENVIRONMENTS[*]}."
 }
 
-ENVIRONMENTS=(dev staging)
+# Region A namespaces with their own database: the environments, then the
+# prod cells in region A (bigtech profile). Region B's cell uses region B's
+# own Postgres (scripts/setup-region.sh database).
+ENVIRONMENTS=(dev staging prod-a1 prod-a2)
 
 # psql as the postgres superuser over the pod's local socket (trusted inside
 # the container only; from the network, Postgres requires a password).
@@ -106,7 +101,7 @@ psql_admin() { k exec -i -n data postgres-0 -- psql -U postgres -v ON_ERROR_STOP
 setup_env_databases() {
   local env db admin conn password
   for env in "${ENVIRONMENTS[@]}"; do
-    db="crud_$env" admin="vault_$env" conn="crud-$env-postgres"
+    db="crud_${env//-/_}" admin="vault_${env//-/_}" conn="crud-$env-postgres"
 
     psql_admin -d postgres >/dev/null <<SQL
 SELECT 'CREATE DATABASE $db' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '$db')\gexec

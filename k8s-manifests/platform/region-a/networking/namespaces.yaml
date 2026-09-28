@@ -13,3 +13,19 @@ metadata:
   name: staging
   labels:
     istio-injection: enabled
+---
+# Prod cells in region A (bigtech profile), created by the prod-cells
+# ApplicationSet (argocd/cells.yaml).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: prod-a1
+  labels:
+    istio-injection: enabled
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: prod-a2
+  labels:
+    istio-injection: enabled
