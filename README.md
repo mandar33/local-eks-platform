@@ -178,21 +178,23 @@ local-eks-platform/
 ├── k8s-manifests/
 │   ├── charts/base-api/         # One Helm chart for both APIs:
 │   │                            #   Deployment, Service, HPA, ServiceAccount
-│   └── environments/dev/
-│       ├── frontend-values.yaml # frontend values (image, env); Kargo updates image.tag
-│       ├── frontend-canary-values.yaml # canary on/off + tag, layered on frontend-values
-│       ├── flipt-values.yaml    # Flipt's settings (official chart): read flags from Git
-│       ├── crud-values.yaml     # crud values (image, env, which Secret keys to read)
-│       ├── argocd-apps.yaml     # Argo CD Applications for region A
-│       ├── networking/          # Istio Gateway, VirtualService, AuthorizationPolicy
-│       ├── data/                # Postgres StatefulSet + seed SQL (no credentials)
-│       ├── secrets/             # Vault Secrets Operator resources for crud-db
-│       ├── registry/            # Zot: TLS certs, config, Deployment, NodePort 30500
-│       ├── kargo/               # Kargo Project, Warehouse, Stages (dev, region-b), Git credentials
-│       ├── crossplane/          # The Cell API: XRD, Composition, functions, RBAC
-│       ├── cells/               # Cell a and Cell b
-│       ├── regions/             # NodePorts region B uses for Vault and Postgres
-│       └── region-b/            # Region B: values overrides, networking, secrets, Argo CD apps
+│   ├── apps/                    # Helm values, layered: common first, then one copy's file
+│   │   ├── common/              #   shared by every copy: image repo, env, secrets, replicas
+│   │   ├── dev/                 #   dev's image.tag (Kargo updates it) + canary values
+│   │   └── region-b/            #   region B's image.tag (Kargo) + its DB address
+│   ├── platform/
+│   │   ├── region-a/
+│   │   │   ├── networking/      # Istio Gateway, VirtualService, AuthorizationPolicy
+│   │   │   ├── data/            # Postgres StatefulSet + seed SQL (no credentials)
+│   │   │   ├── secrets/         # Vault Secrets Operator resources for crud-db
+│   │   │   ├── registry/        # Zot: TLS certs, config, Deployment, NodePort 30500
+│   │   │   ├── kargo/           # Kargo Project, Warehouse, Stages (dev → region-b → cell-a → cell-b), Git credentials
+│   │   │   ├── crossplane/      # The Cell API: XRD, Composition, functions, RBAC
+│   │   │   ├── cells/           # Cell a and Cell b
+│   │   │   ├── regions/         # NodePorts region B uses for Vault and Postgres
+│   │   │   └── flipt-values.yaml # Flipt's settings (official chart): read flags from Git
+│   │   └── region-b/            # Region B: networking, secrets
+│   └── argocd/                  # Argo CD Applications: region-a.yaml, region-b.yaml
 ├── notes/                       # Findings, future improvements, EKS Auto Mode design
 ├── platform/vault/              # Helm values for Vault
 ├── platform/global-lb/          # nginx config for the global load balancer
@@ -212,23 +214,23 @@ local-eks-platform/
 └── istio-mtls.yaml              # Mesh-wide STRICT mTLS
 ```
 
-Argo CD Applications in `argocd-apps.yaml`:
+Argo CD Applications in `k8s-manifests/argocd/region-a.yaml` (paths below are under `k8s-manifests/`):
 
 | Application | Source | Deploys |
 |---|---|---|
-| `frontend-api-dev` | `charts/base-api` + `frontend-values.yaml` | frontend Deployment, Service, HPA, ServiceAccount |
-| `crud-api-dev` | `charts/base-api` + `crud-values.yaml` | crud Deployment, Service, HPA, ServiceAccount |
-| `platform-networking-dev` | `environments/dev/networking/` | Gateway, VirtualService, AuthorizationPolicy |
-| `postgres-dev` | `environments/dev/data/` | Postgres StatefulSet, Service, seed SQL |
-| `vault-secrets-dev` | `environments/dev/secrets/` | Resources that produce the `crud-db` Secret |
-| `registry-dev` | `environments/dev/registry/` | Zot and its certificates and login |
-| `kargo-dev` | `environments/dev/kargo/` | Kargo Project, Warehouse, Stages and Git credentials |
-| `flipt-dev` | Flipt's official chart (helm.flipt.io, 0.87.9) + `flipt-values.yaml` from this repo | Flipt (a "multi-source" app: chart from one place, values from another) |
-| `frontend-api-canary-dev` | `charts/base-api` + `frontend-values.yaml` + `frontend-canary-values.yaml` | The frontend canary Deployment (nothing when `canary.enabled: false`) |
-| `crossplane-dev` | `environments/dev/crossplane/` | The `Cell` API |
-| `cells-dev` | `environments/dev/cells/` | `Cell` a and b; Crossplane then creates `cell-<name>-frontend-api` and `cell-<name>-crud-api` apps |
-| `cross-region-dev` | `environments/dev/regions/` | NodePorts 30820 (Vault) and 30432 (Postgres) for region B |
-| `region-b-*` (5 apps) | `environments/region-b/` + the chart | Region B's frontend, crud-api, Flipt, networking and DB credentials, deployed to the `region-b` cluster |
+| `frontend-api-dev` | `charts/base-api` + `apps/common/` and `apps/dev/frontend-values.yaml` | frontend Deployment, Service, HPA, ServiceAccount |
+| `crud-api-dev` | `charts/base-api` + `apps/common/` and `apps/dev/crud-values.yaml` | crud Deployment, Service, HPA, ServiceAccount |
+| `platform-networking-dev` | `platform/region-a/networking/` | Gateway, VirtualService, AuthorizationPolicy |
+| `postgres-dev` | `platform/region-a/data/` | Postgres StatefulSet, Service, seed SQL |
+| `vault-secrets-dev` | `platform/region-a/secrets/` | Resources that produce the `crud-db` Secret |
+| `registry-dev` | `platform/region-a/registry/` | Zot and its certificates and login |
+| `kargo-dev` | `platform/region-a/kargo/` | Kargo Project, Warehouse, Stages and Git credentials |
+| `flipt-dev` | Flipt's official chart (helm.flipt.io, 0.87.9) + `platform/region-a/flipt-values.yaml` from this repo | Flipt (a "multi-source" app: chart from one place, values from another) |
+| `frontend-api-canary-dev` | `charts/base-api` + the frontend values + `apps/dev/frontend-canary-values.yaml` | The frontend canary Deployment (nothing when `canary.enabled: false`) |
+| `crossplane-dev` | `platform/region-a/crossplane/` | The `Cell` API |
+| `cell-a`, `cell-b` | `platform/region-a/cells/` (one file each) | One `Cell` each; Crossplane then creates `cell-<name>-frontend-api` and `cell-<name>-crud-api` apps |
+| `cross-region-dev` | `platform/region-a/regions/` | NodePorts 30820 (Vault) and 30432 (Postgres) for region B |
+| `region-b-*` (5 apps, in `argocd/region-b.yaml`) | `platform/region-b/`, `apps/region-b/` + the chart | Region B's frontend, crud-api, Flipt, networking and DB credentials, deployed to the `region-b` cluster |
 
 ## Setup from scratch
 
@@ -258,7 +260,7 @@ helm upgrade --install metrics-server metrics-server/metrics-server -n kube-syst
   --set 'args={--kubelet-insecure-tls}'
 
 # 5. Flipt: nothing to do here. The flipt-dev Argo CD app (step 7) installs it
-#    from its official chart with k8s-manifests/environments/dev/flipt-values.yaml.
+#    from its official chart with k8s-manifests/platform/region-a/flipt-values.yaml.
 
 # 6. Argo Rollouts and Kargo. Type the Kargo admin password at the hidden prompt.
 kubectl create namespace argo-rollouts
@@ -273,7 +275,7 @@ helm upgrade --install kargo oci://ghcr.io/akuity/kargo-charts/kargo --version 1
 unset HASH
 
 # 7. Hand the rest to Argo CD. Some apps wait for steps 8-10; that's expected.
-kubectl apply -n argocd -f k8s-manifests/environments/dev/argocd-apps.yaml
+kubectl apply -n argocd -f k8s-manifests/argocd/region-a.yaml
 
 # 8. Vault: installs Vault + the operator, creates the Postgres admin password,
 #    connects Vault to Postgres and rotates that password.
@@ -324,7 +326,7 @@ CLUSTER=region-b REGISTRY_HOST=dev-cluster-control-plane scripts/setup-registry.
 
 # Register region B with Argo CD and Vault, start global-lb on localhost:7080
 scripts/setup-region.sh
-kubectl apply -n argocd -f k8s-manifests/environments/region-b/argocd-apps.yaml
+kubectl apply -n argocd -f k8s-manifests/argocd/region-b.yaml
 ```
 
 </details>
@@ -376,23 +378,21 @@ curl localhost:8080/users/1
 Both APIs come from `charts/base-api`. Only the values files differ. Helm runs locally; no cluster needed.
 
 ```bash
-helm lint k8s-manifests/charts/base-api -f k8s-manifests/environments/dev/frontend-values.yaml
+helm lint k8s-manifests/charts/base-api -f k8s-manifests/apps/common/frontend-values.yaml
 # 1 chart(s) linted, 0 chart(s) failed
 
-# What Argo CD will apply for the frontend
-helm template frontend-api k8s-manifests/charts/base-api \
-  -f k8s-manifests/environments/dev/frontend-values.yaml | grep -E "^kind:|^  name:"
+# What Argo CD will apply for dev's frontend: common values, then dev's on top
+A=k8s-manifests/apps
+helm template frontend-api k8s-manifests/charts/base-api   -f $A/common/frontend-values.yaml -f $A/dev/frontend-values.yaml | grep -E "^kind:|^  name:"
 # kind: ServiceAccount / Service / Deployment / HorizontalPodAutoscaler
 
 # Same chart, different values: compare images and env vars
 for v in frontend crud; do echo "[$v]"
-  helm template x k8s-manifests/charts/base-api -f k8s-manifests/environments/dev/$v-values.yaml \
-    | grep -E "image:|- name: [A-Z_]+$"; done
+  helm template x k8s-manifests/charts/base-api -f $A/common/$v-values.yaml -f $A/dev/$v-values.yaml     | grep -E "image:|- name: [A-Z_]+$"; done
 # [frontend] CRUD_API_URL, FLIPT_URL      [crud] DB_HOST, DB_NAME, DB_PORT, DB_PASSWORD, DB_USER
 
 # See exactly what one extra value changes
-diff <(helm template x k8s-manifests/charts/base-api -f k8s-manifests/environments/dev/frontend-values.yaml) \
-     <(helm template x k8s-manifests/charts/base-api -f k8s-manifests/environments/dev/frontend-values.yaml --set env.LOG_LEVEL=debug)
+diff <(helm template x k8s-manifests/charts/base-api -f $A/common/frontend-values.yaml)      <(helm template x k8s-manifests/charts/base-api -f $A/common/frontend-values.yaml --set env.LOG_LEVEL=debug)
 # >         - name: LOG_LEVEL
 # >           value: "debug"
 ```
@@ -410,7 +410,7 @@ curl -s -o /dev/null -w "%{http_code}\n" localhost:8080/api/v1/users/1
 # 404   (crud-api is not exposed; only the frontend is routed)
 ```
 
-Routing, rewrites, timeouts, retries and fault injection all go in the `VirtualService` in `k8s-manifests/environments/dev/networking/istio-networking.yaml`.
+Routing, rewrites, timeouts, retries and fault injection all go in the `VirtualService` in `k8s-manifests/platform/region-a/networking/istio-networking.yaml`.
 
 ### Service-to-service (mTLS + authorization)
 
@@ -535,7 +535,7 @@ kubectl exec -n cell-a xcell -c xcell -- curl -s http://crud-api-svc.cell-b.svc.
 kubectl delete pod xcell -n cell-a
 ```
 
-**Add a cell:** copy a `Cell` in `k8s-manifests/environments/dev/cells/cells.yaml` with a new name, push, and add a route for it in the `cell-router` VirtualService. Crossplane creates the namespace, both Argo CD apps, the Vault credential resources and the access policy. Each cell gets its own DB user; cells share the one Postgres to save memory. A production cell would also have its own data store.
+**Add a cell:** copy `k8s-manifests/platform/region-a/cells/cell-a.yaml` to a new file with a new name, add an Argo CD app for it in `argocd/region-a.yaml` (like `cell-a`), push, and add a route for it in the `cell-router` VirtualService. Crossplane creates the namespace, both Argo CD apps, the Vault credential resources and the access policy. Each cell gets its own DB user; cells share the one Postgres to save memory. A production cell would also have its own data store.
 
 If `cells.localhost` doesn't resolve on your machine, use `curl -H 'Host: cells.localhost' localhost:8080/users/1`.
 
@@ -777,7 +777,7 @@ A leaked `crud-db` password is therefore read-only, limited to one database, and
 ### Rules for contributors
 
 - Never commit a password, token, key or `.env` file. `.gitignore` blocks the usual file names. The [gitleaks](https://github.com/gitleaks/gitleaks) pre-commit hook blocks the rest: `pip install pre-commit && pre-commit install`.
-- Put a new app secret in Vault, then add a `VaultStaticSecret` or `VaultDynamicSecret` under `k8s-manifests/environments/dev/`. Reference it from the values file with `secretEnv`, as `crud-values.yaml` does.
+- Put a new app secret in Vault, then add a `VaultStaticSecret` or `VaultDynamicSecret` under `k8s-manifests/platform/region-a/secrets/`. Reference it from the values file with `secretEnv`, as `apps/common/crud-values.yaml` does.
 - Pass secrets to CLIs on stdin or at a hidden prompt (`read -rs`), not as command-line arguments. Arguments show up in shell history and process lists.
 - Give tokens the least access that works: Kargo's GitHub token should be fine-grained, limited to this repository, with only **Contents: Read and write**.
 - Turn on GitHub [secret scanning and push protection](https://docs.github.com/en/code-security/secret-scanning) for the repo.

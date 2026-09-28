@@ -18,7 +18,7 @@ nodes:
       - containerPort: 30443
         hostPort: 8443
         protocol: TCP
-      # Zot registry NodePort (see k8s-manifests/environments/dev/registry/).
+      # Zot registry NodePort (see k8s-manifests/platform/region-a/registry/).
       - containerPort: 30500
         hostPort: 5001
         listenAddress: "127.0.0.1"

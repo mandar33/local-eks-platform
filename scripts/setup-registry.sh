@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Wires up the Zot registry (k8s-manifests/environments/dev/registry/).
+# Wires up the Zot registry (k8s-manifests/platform/region-a/registry/).
 # Run after scripts/bootstrap-vault.sh. Safe to re-run.
 #
 #   scripts/setup-registry.sh          everything below, in order
