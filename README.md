@@ -361,11 +361,11 @@ What waits for what, so nothing surprises you:
 
 ## How to test each component
 
-For tests from inside the mesh, start a throwaway pod once. It gets a sidecar like any app in `default`:
+For tests from inside the mesh, start a throwaway pod once. It runs in `dev`, next to dev's apps, and gets a sidecar like them:
 
 ```bash
-kubectl run curl -n default --image=curlimages/curl --restart=Never --command -- sleep 86400
-kubectl wait pod/curl --for=condition=Ready --timeout=120s
+kubectl run curl -n dev --image=curlimages/curl --restart=Never --command -- sleep 86400
+kubectl wait pod/curl -n dev --for=condition=Ready --timeout=120s
 ```
 
 ### End to end
@@ -420,15 +420,15 @@ Routing, rewrites, timeouts, retries and fault injection all go in the `VirtualS
 
 ```bash
 # The curl pod runs as sa/default, which the AuthorizationPolicy doesn't allow
-kubectl exec curl -c curl -- curl -s -w " [%{http_code}]\n" http://crud-api-svc/api/v1/users/1
+kubectl exec -n dev curl -c curl -- curl -s -w " [%{http_code}]\n" http://crud-api-svc/api/v1/users/1
 # RBAC: access denied [403]
 
 # Plaintext (sent from the sidecar container itself) is rejected by STRICT mTLS
-kubectl exec curl -c istio-proxy -- curl -s http://crud-api-svc/api/v1/users/1; echo "exit $?"
+kubectl exec -n dev curl -c istio-proxy -- curl -s http://crud-api-svc/api/v1/users/1; echo "exit $?"
 # exit 56   (connection reset)
 
 # Services without a policy accept any mesh caller
-kubectl exec curl -c curl -- curl -s http://frontend-api-svc/healthz
+kubectl exec -n dev curl -c curl -- curl -s http://frontend-api-svc/healthz
 # {"status":"ok"}
 ```
 
@@ -448,13 +448,13 @@ If Flipt crash-loops after a push, the file has a field Flipt doesn't accept. `k
 
 ### Argo CD
 
-The clearest way to see Argo CD work: change one number in Git and watch the cluster follow. Set `minReplicas: 2` in `frontend-values.yaml`, commit, push, then `kubectl get pods -l app=frontend-api -w`. A second pod appeared 129 seconds later in testing (Argo CD's regular check of Git). Revert it and make Argo CD look straight away with `kubectl annotate application frontend-api-dev -n argocd argocd.argoproj.io/refresh=normal --overwrite`: 3 seconds. Note that the cells use the same values file, so they follow the change too.
+The clearest way to see Argo CD work: change one number in Git and watch the cluster follow. Set `minReplicas: 2` in `apps/dev/frontend-values.yaml` (under `autoscaling:`), commit, push, then `kubectl get pods -n dev -l app=frontend-api -w`. A second pod appeared 129 seconds later in testing (Argo CD's regular check of Git). Revert it and make Argo CD look straight away with `kubectl annotate application frontend-api-dev -n argocd argocd.argoproj.io/refresh=normal --overwrite`: 3 seconds. Note that the cells use the same values file, so they follow the change too.
 
 ```bash
 kubectl get applications -n argocd                 # all Synced / Healthy
 
 # Self-heal: delete something Argo CD manages and watch it come back
-kubectl delete svc crud-api-svc && kubectl get svc crud-api-svc
+kubectl delete svc crud-api-svc -n dev && kubectl get svc crud-api-svc -n dev
 # crud-api-svc   ClusterIP   ...   1s
 
 # UI at https://localhost:8090 (user: admin)
@@ -508,7 +508,7 @@ The frontend has a second Deployment, `frontend-api-canary`, controlled by `fron
 
 ```bash
 # 1. Pods first: canary.enabled: true and image.tag: <new tag> in frontend-canary-values.yaml;
-#    commit, push, wait for `kubectl get deploy frontend-api-canary` to show 1/1.
+#    commit, push, wait for `kubectl get deploy frontend-api-canary -n dev` to show 1/1.
 # 2. Then traffic: stable/canary weights 90/10 in both VirtualServices; commit, push.
 # 3. Count which version answers
 for i in $(seq 1 200); do curl -s -o /dev/null -D - localhost:8080/users/1 | grep -i '^x-app-version' ; done | sort | uniq -c
@@ -580,15 +580,15 @@ What's simplified: region B has no database or Vault of its own, so region A is 
 The Deployments don't set `replicas`, so the HPA owns the replica count and Argo CD doesn't reset it. Generate load from inside the mesh and watch it scale:
 
 ```bash
-kubectl run load --image=busybox:1.37 --restart=Never --command -- sh -c \
+kubectl run load -n dev --image=busybox:1.37 --restart=Never --command -- sh -c \
   'for i in 1 2 3 4 5 6 7 8; do (while true; do wget -q -O- http://frontend-api-svc/users/1 >/dev/null 2>&1; done) & done; wait'
 
-kubectl get hpa frontend-api-hpa -w
+kubectl get hpa frontend-api-hpa -n dev -w
 # cpu: 2%/70%     1   3   1
 # cpu: 197%/70%   1   3   1
 # cpu: 549%/70%   1   3   3     <- scaled to the max within about 40 seconds
 
-kubectl delete pod load
+kubectl delete pod load -n dev
 ```
 
 After the load stops, replicas drop back to 1 once the HPA's 5-minute scale-down window passes. `crud-api-hpa` rises too, because every frontend request calls crud.
@@ -597,12 +597,12 @@ After the load stops, replicas drop back to 1 once the HPA's 5-minute scale-down
 
 ```bash
 # The operator's view: has it fetched credentials?
-kubectl get vaultdynamicsecret crud-db
+kubectl get vaultdynamicsecret crud-db -n dev
 # NAME      SYNCED   HEALTHY   READY
 # crud-db   True     True      True
 
 # The username Vault generated for crud-api (don't print the password)
-kubectl get secret crud-db -o jsonpath='{.data.username}' | base64 -d; echo
+kubectl get secret crud-db -n dev -o jsonpath='{.data.username}' | base64 -d; echo
 # v-kubernet-crud-api-y43L26afNrQM0wCIXvdG-1790373574
 
 # Restart Vault: it comes back sealed, the app keeps serving, then unseal it
@@ -678,7 +678,7 @@ After a successful promotion:
 
 - GitHub shows a commit by **Kargo**: `dev: frontend-api 1.0.1 (promoted by Kargo)`.
 - `kubectl get stage dev -n local-eks-platform` shows `Freight has been verified`.
-- `kubectl get deploy frontend-api -o jsonpath='{.spec.template.spec.containers[0].image}'` shows `localhost:5001/frontend-api:1.0.1`.
+- `kubectl get deploy frontend-api -n dev -o jsonpath='{.spec.template.spec.containers[0].image}'` shows `localhost:5001/frontend-api:1.0.1`.
 - Run `git pull` before your next local commit, since Kargo pushed to `main`.
 
 **Shipping a real code change** is the same loop: edit `apps/frontend-api`, then `docker build -t localhost:5001/frontend-api:1.0.2 apps/frontend-api && docker push localhost:5001/frontend-api:1.0.2`, and promote the new Freight.
@@ -731,7 +731,7 @@ Renewed automatically: crud-api's DB users (hourly), Zot's TLS certificate (2027
 | `403 RBAC: access denied` calling crud-api | AuthorizationPolicy: only `sa/frontend-api` may call it | Expected. Edit `networking/istio-networking.yaml` to allow more callers |
 | Empty reply from `localhost:8080` | No Gateway/VirtualService applied | Check `kubectl get gateway,virtualservice -A` and the `platform-networking-dev` app |
 | HPA shows `<unknown>` | metrics-server missing | Install it with `--kubelet-insecure-tls` |
-| `crud-api` stuck in `CreateContainerConfigError` | `crud-db` Secret doesn't exist yet | Run `scripts/bootstrap-vault.sh`; check `kubectl get vaultdynamicsecret crud-db` |
+| `crud-api` stuck in `CreateContainerConfigError` | `crud-db` Secret doesn't exist yet | Run `scripts/bootstrap-vault.sh`; check `kubectl get vaultdynamicsecret crud-db -n dev` |
 | `vault-0` Running but `0/1` Ready | Vault is sealed (it seals on every restart) | `scripts/bootstrap-vault.sh unseal` |
 | `ImagePullBackOff` for `localhost:5001/...` | Image not pushed, or node mirrors not set up | `curl -sk https://localhost:5001/v2/_catalog`; re-run `scripts/setup-registry.sh nodes` |
 | `docker push` fails with `manifest invalid` | Zot rejects Docker v2 manifests unless `compat: docker2s2` is set | Already set in `registry/zot.yaml`; check the ConfigMap was synced |
