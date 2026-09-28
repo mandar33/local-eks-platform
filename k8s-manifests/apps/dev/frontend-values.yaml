@@ -2,3 +2,6 @@
 # Kargo's "dev" Stage updates image.tag.
 image:
   tag: 1.2.8
+
+env:
+  CRUD_API_URL: http://crud-api-svc.dev.svc.cluster.local

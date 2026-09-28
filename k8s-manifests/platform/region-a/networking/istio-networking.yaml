@@ -19,7 +19,7 @@ kind: DestinationRule
 metadata:
   name: frontend-api
 spec:
-  host: frontend-api-svc.default.svc.cluster.local
+  host: frontend-api-svc.dev.svc.cluster.local
   subsets:
   - name: stable
     labels:
@@ -28,7 +28,8 @@ spec:
     labels:
       track: canary
 ---
-# Traffic from the gateway (users). Canary weight lives here:
+# Traffic from the gateway (users) goes to dev: localhost:8080 and
+# dev.localhost:8080 both match "*". Canary weight lives here:
 #   0   = canary gets nothing (use this when canary.enabled is false)
 #   10  = one request in ten goes to the canary
 # `x-canary: always` sends a request to the canary regardless of weight.
@@ -49,7 +50,7 @@ spec:
           exact: always
     route:
     - destination:
-        host: frontend-api-svc.default.svc.cluster.local
+        host: frontend-api-svc.dev.svc.cluster.local
         subset: canary
         port:
           number: 80
@@ -60,13 +61,13 @@ spec:
   - name: weighted
     route:
     - destination:
-        host: frontend-api-svc.default.svc.cluster.local
+        host: frontend-api-svc.dev.svc.cluster.local
         subset: stable
         port:
           number: 80
       weight: 100
     - destination:
-        host: frontend-api-svc.default.svc.cluster.local
+        host: frontend-api-svc.dev.svc.cluster.local
         subset: canary
         port:
           number: 80
@@ -86,7 +87,7 @@ spec:
   gateways:
   - mesh
   hosts:
-  - frontend-api-svc.default.svc.cluster.local
+  - frontend-api-svc.dev.svc.cluster.local
   http:
   - name: force-canary
     match:
@@ -95,16 +96,16 @@ spec:
           exact: always
     route:
     - destination:
-        host: frontend-api-svc.default.svc.cluster.local
+        host: frontend-api-svc.dev.svc.cluster.local
         subset: canary
   - name: weighted
     route:
     - destination:
-        host: frontend-api-svc.default.svc.cluster.local
+        host: frontend-api-svc.dev.svc.cluster.local
         subset: stable
       weight: 100
     - destination:
-        host: frontend-api-svc.default.svc.cluster.local
+        host: frontend-api-svc.dev.svc.cluster.local
         subset: canary
       weight: 0
 ---
@@ -186,17 +187,3 @@ spec:
       response:
         set:
           x-cell: "a"
----
-apiVersion: security.istio.io/v1beta1
-kind: AuthorizationPolicy
-metadata:
-  name: allow-frontend-to-crud
-spec:
-  selector:
-    matchLabels:
-      app: crud-api
-  action: ALLOW
-  rules:
-  - from:
-    - source:
-        principals: ["cluster.local/ns/default/sa/frontend-api"]

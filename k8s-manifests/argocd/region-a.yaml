@@ -1,7 +1,6 @@
 # Region A's Applications, synced from Git by the root app (root.yaml).
 # The API apps render charts/base-api with their own values file;
 # platform-networking-dev syncs networking/ (Istio), postgres-dev syncs data/,
-# vault-secrets-dev syncs secrets/ (Vault Secrets Operator resources),
 # registry-dev syncs registry/ (Zot), kargo-dev syncs kargo/ (promotions),
 # frontend-api-canary-dev runs the frontend canary (frontend-canary-values.yaml),
 # crossplane-dev defines the Cell API; cell-a and cell-b create one cell each,
@@ -27,7 +26,7 @@ spec:
         - ../../apps/dev/frontend-values.yaml
   destination:
     server: https://kubernetes.default.svc
-    namespace: default
+    namespace: dev
   syncPolicy:
     automated:
       prune: true
@@ -54,7 +53,7 @@ spec:
         - ../../apps/dev/crud-values.yaml
   destination:
     server: https://kubernetes.default.svc
-    namespace: default
+    namespace: dev
   syncPolicy:
     automated:
       prune: true
@@ -97,35 +96,6 @@ spec:
     automated:
       prune: true
       selfHeal: true
----
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: vault-secrets-dev
-  namespace: argocd
-  # Deleting this app also deletes what it deployed.
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
-spec:
-  project: default
-  source:
-    repoURL: https://github.com/mandar33/local-eks-platform.git
-    targetRevision: main
-    path: k8s-manifests/platform/region-a/secrets
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: default
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    # The VSO CRDs appear only after scripts/bootstrap-vault.sh runs.
-    retry:
-      limit: 20
-      backoff:
-        duration: 15s
-        factor: 2
-        maxDuration: 5m
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -199,7 +169,7 @@ spec:
         - ../../apps/dev/frontend-canary-values.yaml
   destination:
     server: https://kubernetes.default.svc
-    namespace: default
+    namespace: dev
   syncPolicy:
     automated:
       prune: true

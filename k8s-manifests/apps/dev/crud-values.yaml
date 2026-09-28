@@ -2,3 +2,11 @@
 # Kargo's "dev" Stage updates image.tag.
 image:
   tag: 1.2.8
+
+# DB credentials from Vault (role crud-api-dev, bound to namespace dev), and
+# only dev's frontend-api may call this app.
+vaultDbCredentials:
+  enabled: true
+  role: crud-api-dev
+allowCallersFrom:
+  - frontend-api
