@@ -1,7 +1,7 @@
 # Cell prod-b1 (region B, bigtech profile), layered on apps/common/crud-values.yaml.
 # Kargo's "prod-b1" Stage updates image.tag.
 image:
-  tag: 1.2.8
+  tag: 1.2.9
 
 # Region B's own Postgres (postgres.data in the region-b cluster, database
 # crud: the common default). Users come from region A's Vault, which region B
