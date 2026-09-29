@@ -1,7 +1,7 @@
 # Cell prod-a2 (region A, bigtech profile), layered on apps/common/crud-values.yaml.
 # Kargo's "prod-a2" Stage updates image.tag.
 image:
-  tag: 1.2.8
+  tag: 1.2.9
 
 # The cell's own database (scripts/bootstrap-vault.sh databases).
 env:

@@ -1,7 +1,7 @@
 # Cell prod-a2 (region A, bigtech profile), layered on apps/common/frontend-values.yaml.
 # Kargo's "prod-a2" Stage updates image.tag.
 image:
-  tag: 1.2.8
+  tag: 1.2.9
 
 env:
   FLIPT_NAMESPACE: prod   # this environment's flags (feature-flags/prod.features.yaml)
