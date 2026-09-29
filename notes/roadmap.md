@@ -23,6 +23,34 @@ Status: ✅ done · 🔜 next · ⏳ waiting on a decision · ⬜ later
 | – | Round 3: a release through `dev → staging (automatic) → prod-a1 → prod-a2 → prod-b1` | 🔜 | Docs are updated. Also the first real test of automatic staging and of the walkthrough in the guide |
 | – | Final: restructure into dev → staging → prod | 🔜 | Design ready: [environments-design.md](environments-design.md), 10 phases |
 
+## GitOps track
+
+Twenty labs that build on each other: [gitops-labs.md](gitops-labs.md). Round 3 (R3) comes first; Labs 6, 8 and 10 need a fresh release from it.
+
+| # | Lab | Status | Notes |
+|---|---|---|---|
+| R3 | End to end: code → CI → dev → staging (auto) → prod waves | 🔜 | Same as Round 3 above; first real test of automatic staging |
+| 1 | Trace the desired state | ⬜ | Read-only |
+| 2 | Drift: what Argo CD fixes, and what it doesn't | ⬜ | Covers exercise 6 |
+| 3 | Change one environment, predict the diff first | ⬜ | Covers exercise 5 |
+| 4 | Add and remove resources: prune, finalizers, order | ⬜ | Covers exercise 9 (routes) |
+| 5 | Promotion is a commit: gates and the audit trail | ⬜ | |
+| 6 | Stop a bad release: freeze the waves, roll back one cell | ⬜ | Covers exercise 7 |
+| 7 | Guardrails: projects and change freezes | ⬜ | Sync window not tested yet |
+| 8 | Fleets: a new cell from one list entry | ⬜ | Covers exercise 10, first half |
+| 9 | Broken Git: bad commits and how to read them | ⬜ | dev only |
+| 10 | Capstone: rebuild from Git, then run a release alone | ⬜ | |
+| 11 | Sync hooks: run a check as part of the deploy | ⬜ | Istio sidecar on Jobs untested |
+| 12 | Tuning the diff: ignoreDifferences and server-side apply | ⬜ | Reuses the `10m0s` finding |
+| 13 | Flags as GitOps: release a behaviour, not a build | ⬜ | |
+| 14 | Secrets in a GitOps repo | ⬜ | Needs a Vault role for frontend-api |
+| 15 | Pull requests: preview every change, protect main | ⬜ | Branch protection blocks Kargo pushes; pick a fix |
+| 16 | Kargo verification: a smoke test gates the next stage | ⬜ | Untested; first use of Argo Rollouts |
+| 17 | Progressive delivery with Argo Rollouts | ⬜ | Untested |
+| 18 | Lose the hub: when Argo CD itself is down | ⬜ | |
+| 19 | Adopt the hand-installed pieces | ⬜ | Group 5 item; start with metrics-server |
+| 20 | Final: the platform from an empty laptop | ⬜ | Group 5 "clean rebuild"; deletes both clusters |
+
 ## Snyk track (prep for work training)
 
 Four Snyk products, each tried on this repo. Run the scan, read the results, fix one thing, then add the scan to CI.
