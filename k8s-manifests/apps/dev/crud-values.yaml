@@ -1,7 +1,7 @@
 # dev's crud-api, layered on apps/common/crud-values.yaml.
 # Kargo's "dev" Stage updates image.tag.
 image:
-  tag: 1.2.8
+  tag: 1.2.9
 
 # dev's own database (created by scripts/bootstrap-vault.sh databases).
 env:
