@@ -1,7 +1,7 @@
 # staging's frontend-api, layered on apps/common/frontend-values.yaml.
 # Kargo's "staging" Stage updates image.tag.
 image:
-  tag: 1.2.8
+  tag: 1.2.9
 
 env:
   FLIPT_NAMESPACE: staging   # this environment's flags (feature-flags/staging.features.yaml)
