@@ -20,7 +20,7 @@ Status: ✅ done · 🔜 next · ⏳ waiting on a decision · ⬜ later
 | 8 | Canary release: 10% of users to a new version | ⬜ | Two commits: pods first, then weights |
 | 9 | Add and remove a route; see who may call whom | ⬜ | |
 | 10 | Add a new cell, then survive losing a region | ⬜ | |
-| – | Round 3: a release through `dev → staging (automatic) → prod-a1 → prod-a2 → prod-b1` | 🔜 | Docs are updated. Also the first real test of automatic staging and of the walkthrough in the guide |
+| – | Round 3: a release through `dev → staging (automatic) → prod-a1 → prod-a2 → prod-b1` | ✅ 29 Sep | CI run 9, `1.2.9`; push to all cells in 31 min, 0 failed of 2,991 requests. See GitOps track R3 |
 | – | Final: restructure into dev → staging → prod | 🔜 | Design ready: [environments-design.md](environments-design.md), 10 phases |
 
 ## GitOps track
@@ -29,7 +29,7 @@ Twenty labs that build on each other: [gitops-labs.md](gitops-labs.md). Round 3 
 
 | # | Lab | Status | Notes |
 |---|---|---|---|
-| R3 | End to end: code → CI → dev → staging (auto) → prod waves | 🔜 | Same as Round 3 above; first real test of automatic staging |
+| R3 | End to end: code → CI → dev → staging (auto) → prod waves | ✅ 29 Sep | Automatic staging works, but only 10 s after dev (no real check yet: Lab 16) |
 | 1 | Trace the desired state | ⬜ | Read-only |
 | 2 | Drift: what Argo CD fixes, and what it doesn't | ⬜ | Covers exercise 6 |
 | 3 | Change one environment, predict the diff first | ⬜ | Covers exercise 5 |
@@ -125,6 +125,7 @@ Four Snyk products, each tried on this repo. Run the scan, read the results, fix
 
 | Date | What | Commit |
 |---|---|---|
+| 29 Sep | **Round 3 / R3 passed**, `1.2.9` (CI run 9). Push 10:46:31 → CI built + scanned (0 CVEs) in ~25 s → approved → dev 10:50:40 → staging **by itself** 10:50:50 → skip to prod-a2 refused → `promote.sh prod-a1` 10:52:48 → prod-a2 by itself 11:02:54 (10 min 6 s) → prod-b1 by itself 11:17:18 (14 min 24 s) → Healthy 11:18:38. Probe: 2,991/2,991 `200`. One command typed for prod. GitOps labs track (R3 + 20 labs) added | `dc47ea8`, `8e7e378` … `3d39553` |
 | 28 Sep | Docs: README rewritten for the new layout; HTML guide updated (local only) incl. Lab 12 cells/waves, new Lab 14 profiles, layout and ApplicationSet diagrams. Flag 50% split re-measured in Flipt namespace `dev`: same users as before, prod untouched. Automatic staging still untested: first real run is Round 3 | `c2b9a75`, `18b5764`, `94d294e` |
 | 28 Sep | Phase 9: Argo CD projects `nonprod` / `prod` (tested: a nonprod app aimed at `prod-a1` is refused); staging auto-promotes once dev verifies (untested until the next release, Round 3); Flipt namespaces `dev` / `staging` / `prod`, `FLIPT_NAMESPACE` per frontend, `flag.sh` per namespace. 0 failed of 90 requests | `cd8c972`, `ed042c1` + next |
 | 28 Sep | Phase 8: profiles `bigtech` / `small` (`k8s-manifests/profiles/`), switched by `scripts/profile.sh` (one Git line + global-lb config). Tested both ways: prod back in ~20 s (small) and ~13 s (bigtech), 1 failed check on `:9080` during the first switch. Memory: small ≈ 8.3 GB, bigtech ≈ 8.7 GB | `ed514ec` … `f373fa7` |

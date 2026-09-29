@@ -495,7 +495,7 @@ kubectl get applications -n argocd                 # all Synced / Healthy
 kubectl delete svc crud-api-svc -n dev && kubectl get svc crud-api-svc -n dev
 # crud-api-svc   ClusterIP   ...   1s
 
-# UI at https://localhost:8090 (user: admin)
+# UI at http://localhost:8090 (user: admin). Plain http: Argo CD runs with server.insecure
 kubectl port-forward svc/argocd-server -n argocd 8090:443
 kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d; echo
 ```

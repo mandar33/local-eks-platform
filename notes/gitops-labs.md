@@ -99,12 +99,12 @@ probe > /tmp/probe.log &
 
 | Step | Expected | Measured |
 |---|---|---|
-| push → CI waiting for approval | ~2 min | |
-| approve → dev serving | ~1–2 min | |
-| dev → staging (automatic) | first time ever | |
-| prod-a1 → prod-a2 | ~10–13 min | |
-| prod-a2 → prod-b1 | ~10–13 min | |
-| failed requests | 0 | |
+| push → CI waiting for approval | ~2 min | ~25 s (build cache) |
+| approve → dev serving | ~1–2 min | 16 s after Kargo's commit |
+| dev → staging (automatic) | first time ever | 10 s (commit to commit) |
+| prod-a1 → prod-a2 | ~10–13 min | 10 min 6 s |
+| prod-a2 → prod-b1 | ~10–13 min | 14 min 24 s |
+| failed requests | 0 | 0 of 2,991 (29 Sep, `1.2.9`) |
 
 ---
 
